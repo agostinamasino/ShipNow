@@ -1,13 +1,26 @@
 # ShipNow
 
 API académica de Backend 3 con Node.js, Express y MongoDB/Mongoose.
-Products utiliza Router → Controller → Service → Repository. Users conserva por
-ahora sus consultas directamente en las rutas.
+Products y Users utilizan Router → Controller → Service → Repository.
 
 En Products, el router define los endpoints; el controller maneja HTTP; el service
 valida la entrada, selecciona los campos de creación y traduce los errores de
 validación; el repository ejecuta las operaciones de Mongoose. El modelo Product
 conserva las validaciones de campos y los valores por defecto existentes.
+
+Users sigue las mismas convenciones en `users.routes.js`, `user.controller.js`,
+`user.service.js` y `user.repository.js`: el router delega, el controller maneja
+HTTP, el service valida el cuerpo, selecciona los campos y normaliza el email,
+y el repository concentra las operaciones de Mongoose. El modelo User se conserva.
+El service traduce los errores de Mongoose sin devolver valores recibidos ni
+detalles internos. Respuestas: 200 al listar, 201 al crear, 400 ante datos inválidos,
+409 ante correo duplicado y 500 ante un fallo interno.
+
+Antes de guardar un usuario válido, el repository garantiza un índice único de
+email en MongoDB (se inicializa en el primer POST y se reutiliza). Esto requiere
+permiso para crear índices y también protege ante solicitudes simultáneas.
+Si existen duplicados previos o un índice incompatible, no se modifica ni elimina
+ningún documento: el POST devuelve 500 y se debe revisar el índice/datos existentes.
 
 ## Ejecutar
 
@@ -90,7 +103,9 @@ Product requiere `name` y `price`; `price` no puede ser negativo, `stock` debe s
 un entero no negativo. Valores por defecto: `description: ""`, `stock: 0`, `status: true`.
 User requiere `name` y un `email` con formato básico válido; `role` vale `user` por
 defecto y es texto libre en esta etapa. No hay autenticación ni permisos asociados.
-El email se guarda en minúsculas y todavía no se exige que sea único.
+El email se guarda sin espacios en los extremos y en minúsculas; debe ser único.
+Repetir el POST del mismo email, incluso variando mayúsculas o espacios externos,
+devuelve 409.
 
 Enviar un producto sin `name` o con precio negativo, o un usuario sin `email`,
 devuelve 400. Un fallo de base de datos devuelve 500 con un mensaje genérico.

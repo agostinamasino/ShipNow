@@ -1,11 +1,10 @@
-import 'dotenv/config';
+import config from './config/index.js';
 import express from 'express';
 import mongoose from 'mongoose';
 import productsRouter from './routes/products.routes.js';
 import usersRouter from './routes/users.routes.js';
 
 const app = express();
-const port = Number(process.env.PORT || 3000);
 
 app.use(express.json());
 app.use('/api/products', productsRouter);
@@ -23,16 +22,10 @@ app.use((error, req, res, next) => {
 });
 
 try {
-  if (!process.env.MONGODB_URI) {
-    throw new Error('Falta configurar MONGODB_URI en el archivo .env.');
-  }
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error('PORT debe ser un número entero entre 1 y 65535.');
-  }
-  await mongoose.connect(process.env.MONGODB_URI, { serverSelectionTimeoutMS: 5000 });
+  await mongoose.connect(config.mongodbUri, { serverSelectionTimeoutMS: 5000 });
   console.log('Conexión a MongoDB establecida.');
-  app.listen(port, () => {
-    console.log(`ShipNow escuchando en http://localhost:${port}`);
+  app.listen(config.port, () => {
+    console.log(`ShipNow escuchando en http://localhost:${config.port}`);
   });
 } catch {
   console.error('No se pudo iniciar ShipNow. Revisá PORT, MONGODB_URI y que MongoDB esté disponible.');

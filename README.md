@@ -13,7 +13,24 @@ En esta etapa las consultas están directamente en las rutas, antes de refactori
 ```dotenv
 MONGODB_URI=mongodb://127.0.0.1:27017/shipnow
 PORT=3000
+NODE_ENV=development
 ```
+
+Las tres variables son obligatorias y no pueden estar vacías. `PORT` debe ser un
+entero entre 1 y 65535; `NODE_ENV` admite `development`, `test` o `production`.
+Si tu `.env` ya existía, agregá `NODE_ENV=development` si falta, conservando la URI.
+
+`src/config/index.js` es el único módulo que carga dotenv y lee `process.env`.
+Carga el `.env` de la raíz del proyecto y respeta las variables ya definidas en
+el entorno del proceso. Exporta `config`, congelado con `Object.freeze`, con las
+propiedades `port` (número), `mongodbUri` y `nodeEnv`. Una configuración inválida
+detiene el arranque antes de conectar a MongoDB, indicando la variable afectada
+sin imprimir su valor.
+
+Para verificar la validación, ejecutá `npm test`. Las pruebas usan procesos aislados
+y desactivan la lectura de dotenv únicamente en esos procesos: no leen ni modifican
+tu `.env`, ni conectan a MongoDB. Comprueban variables ausentes, vacías y con espacios,
+puertos inválidos, ambientes permitidos y la inmutabilidad del objeto exportado.
 
 Para MongoDB local, instalar MongoDB Community y mantener su servicio en ejecución.
 La base `shipnow` y sus colecciones se crean al guardar los primeros documentos.

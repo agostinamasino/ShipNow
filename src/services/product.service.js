@@ -34,7 +34,9 @@ export async function createProduct(data) {
     });
   } catch (error) {
     if (error.name === 'ValidationError') {
-      throw validationError(error.message);
+      const fields = ['name', 'description', 'price', 'stock', 'status']
+        .filter(field => error.errors?.[field]);
+      throw validationError(`Datos de producto inválidos. Revisá los campos: ${fields.join(', ') || 'name, description, price, stock, status'}.`);
     }
     throw error;
   }

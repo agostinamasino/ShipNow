@@ -1,7 +1,13 @@
 # ShipNow
 
 API académica de Backend 3 con Node.js, Express y MongoDB/Mongoose.
-En esta etapa las consultas están directamente en las rutas, antes de refactorizar a capas.
+Products utiliza Router → Controller → Service → Repository. Users conserva por
+ahora sus consultas directamente en las rutas.
+
+En Products, el router define los endpoints; el controller maneja HTTP; el service
+valida la entrada, selecciona los campos de creación y traduce los errores de
+validación; el repository ejecuta las operaciones de Mongoose. El modelo Product
+conserva las validaciones de campos y los valores por defecto existentes.
 
 ## Ejecutar
 

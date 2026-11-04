@@ -1,7 +1,7 @@
 import Product from '../models/Product.js';
 
 export function findAll() {
-  return Product.find();
+  return Product.find().lean();
 }
 
 export function create(data) {

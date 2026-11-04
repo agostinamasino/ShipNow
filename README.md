@@ -6,12 +6,12 @@ Products y Users utilizan Router → Controller → Service → Repository.
 En Products, el router define los endpoints; el controller maneja HTTP; el service
 valida la entrada, selecciona los campos de creación y traduce los errores de
 validación; el repository ejecuta las operaciones de Mongoose. El modelo Product
-conserva las validaciones de campos y los valores por defecto existentes.
+conserva las validaciones de campos; sus estados se definen mediante constantes.
 
 Users sigue las mismas convenciones en `users.routes.js`, `user.controller.js`,
 `user.service.js` y `user.repository.js`: el router delega, el controller maneja
 HTTP, el service valida el cuerpo, selecciona los campos y normaliza el email,
-y el repository concentra las operaciones de Mongoose. El modelo User se conserva.
+y el repository concentra las operaciones de Mongoose. El modelo User valida los roles.
 El service traduce los errores de Mongoose sin devolver valores recibidos ni
 detalles internos. Respuestas: 200 al listar, 201 al crear, 400 ante datos inválidos,
 409 ante correo duplicado y 500 ante un fallo interno.
@@ -82,7 +82,7 @@ Producto de ejemplo:
   "description": "Caja para envíos",
   "price": 1500,
   "stock": 20,
-  "status": true
+  "status": "available"
 }
 ```
 
@@ -100,12 +100,41 @@ Después de cada POST, ejecutar el GET correspondiente para comprobar la persist
 Los documentos incluyen `_id` y `__v` generados por Mongoose.
 
 Product requiere `name` y `price`; `price` no puede ser negativo, `stock` debe ser
-un entero no negativo. Valores por defecto: `description: ""`, `stock: 0`, `status: true`.
+un entero no negativo. Valores por defecto: `description: ""`, `stock: 0`, `status: "available"`.
 User requiere `name` y un `email` con formato básico válido; `role` vale `user` por
-defecto y es texto libre en esta etapa. No hay autenticación ni permisos asociados.
+defecto y admite únicamente `admin` o `user`. No hay autenticación ni permisos asociados.
 El email se guarda sin espacios en los extremos y en minúsculas; debe ser único.
 Repetir el POST del mismo email, incluso variando mayúsculas o espacios externos,
 devuelve 409.
 
 Enviar un producto sin `name` o con precio negativo, o un usuario sin `email`,
 devuelve 400. Un fallo de base de datos devuelve 500 con un mensaje genérico.
+
+## Constantes y compatibilidad de estados
+
+`src/constants/index.js` exporta dos objetos inmutables mediante `Object.freeze`:
+
+| Constante | Valor |
+| --- | --- |
+| `PRODUCT_STATUS.AVAILABLE` | `available` |
+| `PRODUCT_STATUS.OUT_OF_STOCK` | `out_of_stock` |
+| `USER_ROLES.ADMIN` | `admin` |
+| `USER_ROLES.USER` | `user` |
+
+Los modelos y services usan estas constantes para valores predeterminados y validaciones.
+Los estados o roles no permitidos, incluidos `null` y strings vacíos, devuelven 400.
+
+El GET de Products devuelve siempre estados String: `true` se representa como
+`available` y `false` como `out_of_stock`. El repository usa `lean()` para conservar
+los tipos almacenados y el service convierte copias en memoria, sin guardar cambios.
+Temporalmente el POST también admite booleanos, pero los convierte antes de guardar:
+todos los productos nuevos tienen `status` String. Si se omite, vale `available`.
+No se deduce automáticamente el estado a partir de `stock`.
+
+No se ejecuta una migración ni se modifican documentos previos. Un estado histórico
+fuera de los booleanos y strings admitidos requiere revisión manual; no se corrige
+silenciosamente (GET responde 500). Los roles históricos tampoco se migran.
+
+`npm test` incluye las 24 pruebas de configuración y pruebas sin base de datos para
+la inmutabilidad de constantes, estados heredados, enums de modelos y validación
+del service. Las pruebas automatizadas no modifican Atlas ni el `.env` real.

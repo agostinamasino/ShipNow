@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { USER_ROLES } from '../constants/index.js';
 
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true },
@@ -9,7 +10,13 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'email debe tener un formato válido.'],
   },
-  role: { type: String, default: 'user', trim: true },
+  role: {
+    type: String,
+    enum: Object.values(USER_ROLES),
+    default: USER_ROLES.USER,
+    required: true,
+    trim: true,
+  },
 });
 
 export default mongoose.model('User', userSchema);

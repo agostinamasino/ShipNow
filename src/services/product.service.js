@@ -1,4 +1,5 @@
 import * as productRepository from '../repositories/product.repository.js';
+import { PRODUCT_STATUS } from '../constants/index.js';
 
 function validationError(message) {
   const error = new Error(message);
@@ -6,8 +7,18 @@ function validationError(message) {
   return error;
 }
 
-export function getProducts() {
-  return productRepository.findAll();
+export function normalizeProductStatus(status) {
+  if (status === true || status === undefined) return PRODUCT_STATUS.AVAILABLE;
+  if (status === false) return PRODUCT_STATUS.OUT_OF_STOCK;
+  if (!Object.values(PRODUCT_STATUS).includes(status)) {
+    throw validationError(`status debe ser uno de: ${Object.values(PRODUCT_STATUS).join(', ')}.`);
+  }
+  return status;
+}
+
+export async function getProducts() {
+  const products = await productRepository.findAll();
+  return products.map(product => ({ ...product, status: normalizeProductStatus(product.status) }));
 }
 
 export async function createProduct(data) {
@@ -18,7 +29,9 @@ export async function createProduct(data) {
   // Solo se aceptan los campos de creación; el esquema conserva sus reglas y defaults.
   const { name, description, price, stock, status } = data;
   try {
-    return await productRepository.create({ name, description, price, stock, status });
+    return await productRepository.create({
+      name, description, price, stock, status: normalizeProductStatus(status),
+    });
   } catch (error) {
     if (error.name === 'ValidationError') {
       throw validationError(error.message);

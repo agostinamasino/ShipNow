@@ -1,4 +1,5 @@
 import * as userRepository from '../repositories/user.repository.js';
+import { USER_ROLES } from '../constants/index.js';
 
 function userError(name, message) {
   const error = new Error(message);
@@ -19,7 +20,12 @@ export async function createUser(data) {
     throw userError('UserValidationError', 'Enviá un objeto JSON.');
   }
 
-  const { name, role } = data;
+  const { name } = data;
+  const role = data.role === undefined ? USER_ROLES.USER
+    : typeof data.role === 'string' ? data.role.trim() : data.role;
+  if (!Object.values(USER_ROLES).includes(role)) {
+    throw userError('UserValidationError', `role debe ser uno de: ${Object.values(USER_ROLES).join(', ')}.`);
+  }
   const email = typeof data.email === 'string' ? data.email.trim().toLowerCase() : data.email;
   try {
     if (typeof email === 'string' && email && await userRepository.findByEmail(email)) {

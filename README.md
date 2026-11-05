@@ -58,8 +58,9 @@ en Network Access. Copiar la URI de Connect → Drivers a `MONGODB_URI`, incluye
 el nombre de base `shipnow`, y reemplazar las credenciales. Codificar los caracteres
 especiales de la contraseña para una URL. No compartir `.env`: Git lo ignora.
 
-El servidor escucha después de conectarse a MongoDB. Si la conexión inicial falla,
-sale con código 1. `/health` informa que el servidor responde; no consulta la base.
+El servidor escucha mientras intenta conectarse a MongoDB. Si la conexión inicial
+falla, los GET de mocks y `/health` siguen disponibles. Products y Users requieren
+MongoDB para leer o guardar documentos.
 
 ## Probar con Postman o Thunder Client
 
@@ -102,7 +103,7 @@ Los documentos incluyen `_id` y `__v` generados por Mongoose.
 Product requiere `name` y `price`; `price` no puede ser negativo, `stock` debe ser
 un entero no negativo. Valores por defecto: `description: ""`, `stock: 0`, `status: "available"`.
 User requiere `name` y un `email` con formato básico válido; `role` vale `user` por
-defecto y admite únicamente `admin` o `user`. No hay autenticación ni permisos asociados.
+defecto y admite `admin`, `user` o `courier`. No hay autenticación ni permisos asociados.
 El email se guarda sin espacios en los extremos y en minúsculas; debe ser único.
 Repetir el POST del mismo email, incluso variando mayúsculas o espacios externos,
 devuelve 409.
@@ -138,3 +139,20 @@ silenciosamente (GET responde 500). Los roles históricos tampoco se migran.
 `npm test` incluye las 24 pruebas de configuración y pruebas sin base de datos para
 la inmutabilidad de constantes, estados heredados, enums de modelos y validación
 del service. Las pruebas automatizadas no modifican Atlas ni el `.env` real.
+
+## Vistas previas de mocks
+
+Cada GET admite `qty` como entero entre 0 y 100 (10 por defecto). Cero devuelve
+listas vacías. Un valor inválido o repetido devuelve 400.
+
+| Ejemplo | Listas en la respuesta |
+| --- | --- |
+| GET `/api/mocks/users?qty=2` | `users` |
+| GET `/api/mocks/couriers?qty=2` | `couriers` |
+| GET `/api/mocks/orders?qty=2` | `orders`, `users` |
+| GET `/api/mocks/deliveries?qty=2` | `deliveries`, `orders`, `users`, `couriers` |
+
+Los datos se generan en memoria. En cada respuesta, `userId`, `orderId` y
+`courierId` coinciden con los `_id` de las listas relacionadas de esa respuesta.
+Cada llamada genera un lote independiente. Una entrega asignada o en tránsito
+se vincula a un pedido en curso. Una entrega completada se vincula a un pedido entregado.

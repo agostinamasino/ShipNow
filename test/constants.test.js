@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PRODUCT_STATUS, USER_ROLES } from '../src/constants/index.js';
+import { PRODUCT_STATUS, USER_ROLES, ORDER_STATUS, DELIVERY_STATUS, ORDER_PRIORITY } from '../src/constants/index.js';
 import { normalizeProductStatus, createProduct, getProducts } from '../src/services/product.service.js';
 import { createUser } from '../src/services/user.service.js';
 import Product from '../src/models/Product.js';
@@ -8,8 +8,11 @@ import User from '../src/models/User.js';
 
 test('constantes: valores e inmutabilidad', () => {
   assert.deepEqual(PRODUCT_STATUS, { AVAILABLE: 'available', OUT_OF_STOCK: 'out_of_stock' });
-  assert.deepEqual(USER_ROLES, { ADMIN: 'admin', USER: 'user' });
-  for (const constants of [PRODUCT_STATUS, USER_ROLES]) {
+  assert.deepEqual(USER_ROLES, { ADMIN: 'admin', USER: 'user', COURIER: 'courier' });
+  assert.deepEqual(ORDER_STATUS, { PENDING: 'pending', IN_PROGRESS: 'in_progress', DELIVERED: 'delivered' });
+  assert.deepEqual(DELIVERY_STATUS, { ASSIGNED: 'assigned', IN_TRANSIT: 'in_transit', DELIVERED: 'delivered' });
+  assert.deepEqual(ORDER_PRIORITY, { LOW: 'low', NORMAL: 'normal', HIGH: 'high' });
+  for (const constants of [PRODUCT_STATUS, USER_ROLES, ORDER_STATUS, DELIVERY_STATUS, ORDER_PRIORITY]) {
     assert.ok(Object.isFrozen(constants));
     assert.throws(() => { constants.NEW = 'changed'; }, TypeError);
     assert.throws(() => { constants[Object.keys(constants)[0]] = 'changed'; }, TypeError);

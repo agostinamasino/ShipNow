@@ -8,8 +8,7 @@ function mockId() {
   return randomBytes(12).toString('hex');
 }
 
-export function generatePeople(qty, role) {
-  const batchId = randomUUID();
+export function generatePeople(qty, role, batchId = randomUUID()) {
   const label = role === USER_ROLES.COURIER ? 'Repartidor' : 'Usuario';
 
   return Array.from({ length: qty }, (_, index) => ({
@@ -34,7 +33,7 @@ export function generateDeliveries(orders, couriers) {
   return orders.map((order, index) => ({
     _id: mockId(),
     orderId: order._id,
-    courierId: couriers[index]._id,
+    courierId: couriers[index % couriers.length]._id,
     status: deliveryStates[index % deliveryStates.length],
   }));
 }

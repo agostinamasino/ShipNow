@@ -156,3 +156,31 @@ Los datos se generan en memoria. En cada respuesta, `userId`, `orderId` y
 `courierId` coinciden con los `_id` de las listas relacionadas de esa respuesta.
 Cada llamada genera un lote independiente. Una entrega asignada o en tránsito
 se vincula a un pedido en curso. Una entrega completada se vincula a un pedido entregado.
+
+## Cargar un lote de prueba
+
+`POST /api/mocks/seed?qty=10` crea **10 usuarios, 10 repartidores, 10 pedidos y
+10 entregas**. Con `qty` el total es cuatro veces la cantidad indicada, por lo
+que el rango admitido es de 1 a 25.
+
+Como alternativa, enviá `POST /api/mocks/seed` con `Content-Type: application/json`
+y cantidades explícitas:
+
+```json
+{"users":2,"couriers":2,"orders":3,"deliveries":3}
+```
+
+Los campos omitidos cuentan como cero. El total debe ser de 1 a 100 documentos,
+con cantidades enteras no negativas. Los pedidos requieren al menos un usuario.
+Las entregas requieren al menos un repartidor y un pedido distinto por entrega.
+Los usuarios y repartidores se asignan en rotación dentro del mismo lote.
+
+Una respuesta **201** incluye `batchId`, `counts` e `ids`. Los dos últimos
+agrupan cantidades e IDs por `users`, `couriers`, `orders` y `deliveries`.
+Cada solicitud exitosa crea un lote nuevo. Los correos usan el UUID del lote,
+y todas las referencias apuntan a documentos insertados por esa solicitud.
+
+El seed usa una sola transacción y requiere un MongoDB que las admita, como un
+cluster de Atlas o un replica set. Un fallo aborta el lote. Las entradas inválidas
+devuelven **400**, una conexión no disponible o sin soporte transaccional **503**
+y un fallo inesperado **500**. Los GET de vistas previas funcionan independientemente.

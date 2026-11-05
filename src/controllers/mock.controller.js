@@ -17,3 +17,18 @@ export const getMockUsers = preview(mockService.getMockUsers);
 export const getMockCouriers = preview(mockService.getMockCouriers);
 export const getMockOrders = preview(mockService.getMockOrders);
 export const getMockDeliveries = preview(mockService.getMockDeliveries);
+
+export async function seedMocks(req, res) {
+  try {
+    const batch = await mockService.seedMocks(req.query.qty, req.body);
+    return res.status(201).json(batch);
+  } catch (error) {
+    if (error.name === 'MockValidationError') {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error.name === 'MockPersistenceUnavailableError') {
+      return res.status(503).json({ error: error.message });
+    }
+    return res.status(500).json({ error: 'No se pudo guardar el lote de prueba.' });
+  }
+}

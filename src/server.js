@@ -4,6 +4,8 @@ import mongoose from 'mongoose';
 import productsRouter from './routes/products.routes.js';
 import usersRouter from './routes/users.routes.js';
 import mocksRouter from './routes/mocks.routes.js';
+import { notFound } from './middlewares/not-found.middleware.js';
+import { errorMiddleware } from './middlewares/error.middleware.js';
 
 const app = express();
 
@@ -16,12 +18,8 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.use((error, req, res, next) => {
-  if (error.type === 'entity.parse.failed') {
-    return res.status(400).json({ error: 'El cuerpo debe ser JSON válido.' });
-  }
-  res.status(500).json({ error: 'Error interno del servidor.' });
-});
+app.use(notFound);
+app.use(errorMiddleware);
 
 app.listen(config.port, () => {
   console.log(`ShipNow escuchando en http://localhost:${config.port}`);

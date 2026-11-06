@@ -113,7 +113,7 @@ devuelve 400. Un fallo de base de datos devuelve 500 con un mensaje genérico.
 
 ## Constantes y compatibilidad de estados
 
-`src/constants/index.js` exporta dos objetos inmutables mediante `Object.freeze`:
+`src/constants/index.js` exporta cinco objetos inmutables mediante `Object.freeze`.
 
 | Constante | Valor |
 | --- | --- |
@@ -121,6 +121,16 @@ devuelve 400. Un fallo de base de datos devuelve 500 con un mensaje genérico.
 | `PRODUCT_STATUS.OUT_OF_STOCK` | `out_of_stock` |
 | `USER_ROLES.ADMIN` | `admin` |
 | `USER_ROLES.USER` | `user` |
+| `USER_ROLES.COURIER` | `courier` |
+| `ORDER_STATUS.PENDING` | `pending` |
+| `ORDER_STATUS.IN_PROGRESS` | `in_progress` |
+| `ORDER_STATUS.DELIVERED` | `delivered` |
+| `DELIVERY_STATUS.ASSIGNED` | `assigned` |
+| `DELIVERY_STATUS.IN_TRANSIT` | `in_transit` |
+| `DELIVERY_STATUS.DELIVERED` | `delivered` |
+| `ORDER_PRIORITY.LOW` | `low` |
+| `ORDER_PRIORITY.NORMAL` | `normal` |
+| `ORDER_PRIORITY.HIGH` | `high` |
 
 Los modelos y services usan estas constantes para valores predeterminados y validaciones.
 Los estados o roles no permitidos, incluidos `null` y strings vacíos, devuelven 400.
@@ -142,8 +152,9 @@ del service. Las pruebas automatizadas no modifican Atlas ni el `.env` real.
 
 ## Vistas previas de mocks
 
-Cada GET admite `qty` como entero entre 0 y 100 (10 por defecto). Cero devuelve
-listas vacías. Un valor inválido o repetido devuelve 400.
+Cada GET genera datos en memoria sin guardarlos en MongoDB. Devuelve HTTP 200 y
+admite `qty` como entero entre 0 y 100 (10 por defecto). Cero devuelve listas
+vacías. Un valor inválido o repetido devuelve HTTP 400.
 
 | Ejemplo | Listas en la respuesta |
 | --- | --- |
@@ -152,16 +163,59 @@ listas vacías. Un valor inválido o repetido devuelve 400.
 | GET `/api/mocks/orders?qty=2` | `orders`, `users` |
 | GET `/api/mocks/deliveries?qty=2` | `deliveries`, `orders`, `users`, `couriers` |
 
-Los datos se generan en memoria. En cada respuesta, `userId`, `orderId` y
-`courierId` coinciden con los `_id` de las listas relacionadas de esa respuesta.
-Cada llamada genera un lote independiente. Una entrega asignada o en tránsito
-se vincula a un pedido en curso. Una entrega completada se vincula a un pedido entregado.
+Cada llamada genera un lote independiente. En la misma respuesta, el `userId`
+del pedido apunta al `_id` de un usuario con rol `user`. El `orderId` de la
+entrega apunta al `_id` del pedido y su `courierId` al `_id` de un usuario con
+rol `courier`. Una entrega asignada o en tránsito se vincula a un pedido en
+curso. Una entrega completada se vincula a un pedido entregado.
+
+Ejemplo completo de HTTP 200 para `GET /api/mocks/deliveries?qty=1`. Los IDs y
+correos cambian entre llamadas.
+
+```json
+{
+  "deliveries": [
+    {
+      "_id": "187e54ad6dd2127246e6b78b",
+      "orderId": "f92e7bf10f417ecd74041ed6",
+      "courierId": "d72f4a81677b6a70a5f6333a",
+      "status": "assigned"
+    }
+  ],
+  "orders": [
+    {
+      "_id": "f92e7bf10f417ecd74041ed6",
+      "userId": "1695bde34b1044f1aab65cd3",
+      "status": "in_progress",
+      "priority": "normal",
+      "destinationAddress": "Calle de prueba 1"
+    }
+  ],
+  "users": [
+    {
+      "_id": "1695bde34b1044f1aab65cd3",
+      "name": "Usuario de prueba 1",
+      "email": "user.81ad7166-4578-4b74-82b5-8988347dc9db.1@example.com",
+      "role": "user"
+    }
+  ],
+  "couriers": [
+    {
+      "_id": "d72f4a81677b6a70a5f6333a",
+      "name": "Repartidor de prueba 1",
+      "email": "courier.91b6b66b-d666-40f2-91f0-f3d5571be8f7.1@example.com",
+      "role": "courier"
+    }
+  ]
+}
+```
 
 ## Cargar un lote de prueba
 
-`POST /api/mocks/seed?qty=10` crea **10 usuarios, 10 repartidores, 10 pedidos y
-10 entregas**. Con `qty` el total es cuatro veces la cantidad indicada, por lo
-que el rango admitido es de 1 a 25.
+`POST /api/mocks/seed` inserta documentos en MongoDB. Por ejemplo,
+`POST /api/mocks/seed?qty=10` inserta **10 usuarios, 10 repartidores, 10 pedidos
+y 10 entregas**. El total es cuatro veces `qty`, por lo que el máximo es
+`qty=25` (100 documentos en el lote) y el mínimo es `qty=1`.
 
 Como alternativa, enviá `POST /api/mocks/seed` con `Content-Type: application/json`
 y cantidades explícitas:
@@ -174,13 +228,52 @@ Los campos omitidos cuentan como cero. El total debe ser de 1 a 100 documentos,
 con cantidades enteras no negativas. Los pedidos requieren al menos un usuario.
 Las entregas requieren al menos un repartidor y un pedido distinto por entrega.
 Los usuarios y repartidores se asignan en rotación dentro del mismo lote.
+Combinar `qty` en la URL con un body que incluya cantidades devuelve HTTP 400.
 
 Una respuesta **201** incluye `batchId`, `counts` e `ids`. Los dos últimos
 agrupan cantidades e IDs por `users`, `couriers`, `orders` y `deliveries`.
 Cada solicitud exitosa crea un lote nuevo. Los correos usan el UUID del lote,
 y todas las referencias apuntan a documentos insertados por esa solicitud.
 
+Ejemplo completo de HTTP 201 para `POST /api/mocks/seed?qty=1`.
+
+```json
+{
+  "batchId": "b984a582-156e-4fa7-a679-12e6149558bc",
+  "counts": {
+    "users": 1,
+    "couriers": 1,
+    "orders": 1,
+    "deliveries": 1
+  },
+  "ids": {
+    "users": ["6aebc0251c086be69f9d987c"],
+    "couriers": ["6aebc0261c086be69f9d987d"],
+    "orders": ["6aebc0261c086be69f9d987e"],
+    "deliveries": ["6aebc0261c086be69f9d987f"]
+  }
+}
+```
+
 El seed usa una sola transacción y requiere un MongoDB que las admita, como un
 cluster de Atlas o un replica set. Un fallo aborta el lote. Las entradas inválidas
 devuelven **400**, una conexión no disponible o sin soporte transaccional **503**
 y un fallo inesperado **500**. Los GET de vistas previas funcionan independientemente.
+
+### Probar los mocks en local
+
+Seguí los pasos de [Ejecutar](#ejecutar) y usá el puerto de `PORT` (3000 en los
+ejemplos). Para las vistas previas alcanza con que el servidor esté escuchando.
+Para ejecutar el seed, apuntá la configuración a una base de prueba con soporte
+de transacciones y esperá a que el servidor confirme la conexión.
+
+```sh
+curl.exe "http://localhost:3000/api/mocks/users?qty=2"
+curl.exe "http://localhost:3000/api/mocks/couriers?qty=2"
+curl.exe "http://localhost:3000/api/mocks/orders?qty=2"
+curl.exe "http://localhost:3000/api/mocks/deliveries?qty=1"
+curl.exe -X POST "http://localhost:3000/api/mocks/seed?qty=1"
+```
+
+También podés enviar esas solicitudes desde Postman o Thunder Client. Para probar
+el formato con body, usá POST sin `qty` y pegá el ejemplo de cantidades como JSON.

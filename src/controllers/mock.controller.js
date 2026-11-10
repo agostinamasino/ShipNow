@@ -1,16 +1,7 @@
 import * as mockService from '../services/mock.service.js';
 
 function preview(generate) {
-  return (req, res) => {
-    try {
-      return res.json(generate(req.query.qty));
-    } catch (error) {
-      if (error.name === 'MockValidationError') {
-        return res.status(400).json({ error: error.message });
-      }
-      return res.status(500).json({ error: 'No se pudieron generar los datos simulados.' });
-    }
-  };
+  return (req, res) => res.json(generate(req.query.qty));
 }
 
 export const getMockUsers = preview(mockService.getMockUsers);
@@ -19,16 +10,6 @@ export const getMockOrders = preview(mockService.getMockOrders);
 export const getMockDeliveries = preview(mockService.getMockDeliveries);
 
 export async function seedMocks(req, res) {
-  try {
-    const batch = await mockService.seedMocks(req.query.qty, req.body);
-    return res.status(201).json(batch);
-  } catch (error) {
-    if (error.name === 'MockValidationError') {
-      return res.status(400).json({ error: error.message });
-    }
-    if (error.name === 'MockPersistenceUnavailableError') {
-      return res.status(503).json({ error: error.message });
-    }
-    return res.status(500).json({ error: 'No se pudo guardar el lote de prueba.' });
-  }
+  const batch = await mockService.seedMocks(req.query.qty, req.body);
+  return res.status(201).json(batch);
 }

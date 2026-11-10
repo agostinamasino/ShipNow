@@ -4,6 +4,8 @@ import test, { before, after } from 'node:test';
 import express from 'express';
 import mongoose from 'mongoose';
 import mocksRouter from '../src/routes/mocks.routes.js';
+import { errorMiddleware } from '../src/middlewares/error.middleware.js';
+import { ERROR_CATALOG } from '../src/errors/error.catalog.js';
 import User from '../src/models/User.js';
 import Order from '../src/models/Order.js';
 import Delivery from '../src/models/Delivery.js';
@@ -15,7 +17,9 @@ const endpoints = ['users', 'couriers', 'orders', 'deliveries'];
 
 before(async () => {
   const app = express();
+  app.use(express.json());
   app.use('/api/mocks', mocksRouter);
+  app.use(errorMiddleware);
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   baseUrl = `http://127.0.0.1:${server.address().port}/api/mocks`;
@@ -125,7 +129,21 @@ test('qty inválido devuelve 400 en cada GET', async () => {
     for (const query of ['?qty=', '?qty=-1', '?qty=1.5', '?qty=101', '?qty=abc', '?qty=1e1', '?qty=1&qty=2']) {
       const { status, body } = await get(endpoint, query);
       assert.equal(status, 400, `${endpoint}${query}`);
-      assert.match(body.error, /qty.*entero/);
+      const { code, message } = ERROR_CATALOG.MOCK_INVALID_QTY;
+      assert.deepEqual(body, { success: false, error: { code, message } });
     }
+  }
+});
+
+test('Express propaga los rechazos del POST seed al middleware global', async () => {
+  for (const [query, code] of [
+    ['?qty=26', 'MOCK_INVALID_QTY'],
+    ['?qty=1', 'MOCK_SEED_UNAVAILABLE'],
+  ]) {
+    const response = await fetch(`${baseUrl}/seed${query}`, { method: 'POST' });
+    const { message, status } = ERROR_CATALOG[code];
+    assert.equal(response.status, status);
+    assert.match(response.headers.get('content-type'), /^application\/json\b/);
+    assert.deepEqual(await response.json(), { success: false, error: { code, message } });
   }
 });

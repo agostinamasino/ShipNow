@@ -2,19 +2,14 @@ import mongoose from 'mongoose';
 import User from '../models/User.js';
 import Order from '../models/Order.js';
 import Delivery from '../models/Delivery.js';
-
-function unavailable() {
-  const error = new Error('El seed requiere una conexión MongoDB con soporte para transacciones.');
-  error.name = 'MockPersistenceUnavailableError';
-  return error;
-}
+import { AppError } from '../errors/app-error.js';
 
 function insertedIds(input, inserted) {
   return new Map(input.map((doc, index) => [doc._id, inserted[index]._id]));
 }
 
 export async function insertMockBatch({ users, couriers, orders, deliveries }) {
-  if (mongoose.connection.readyState !== 1) throw unavailable();
+  if (mongoose.connection.readyState !== 1) throw new AppError('MOCK_SEED_UNAVAILABLE');
 
   try {
     return await mongoose.connection.transaction(async session => {
@@ -39,7 +34,7 @@ export async function insertMockBatch({ users, couriers, orders, deliveries }) {
   } catch (error) {
     if (error.code === 20 || ['MongoServerSelectionError', 'MongoNetworkError', 'MongoNetworkTimeoutError']
       .includes(error.name)) {
-      throw unavailable();
+      throw new AppError('MOCK_SEED_UNAVAILABLE', { cause: error });
     }
     throw error;
   }

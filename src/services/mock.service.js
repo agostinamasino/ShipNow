@@ -2,26 +2,21 @@ import { randomUUID } from 'node:crypto';
 import { USER_ROLES, ORDER_STATUS, DELIVERY_STATUS } from '../constants/index.js';
 import { generatePeople, generateOrders, generateDeliveries } from './mock.generator.js';
 import { insertMockBatch } from '../repositories/mock.repository.js';
+import { AppError } from '../errors/app-error.js';
 
 const DEFAULT_QTY = 10;
 const MAX_QTY = 100;
 const batchFields = ['users', 'couriers', 'orders', 'deliveries'];
 
-function invalid(message) {
-  const error = new Error(message);
-  error.name = 'MockValidationError';
-  return error;
-}
-
-function parseQty(value) {
+function parseQty(value, min = 0, max = MAX_QTY) {
   if (value === undefined) return DEFAULT_QTY;
 
   if (typeof value === 'string' && /^\d+$/.test(value)) {
     const qty = Number(value);
-    if (qty <= MAX_QTY) return qty;
+    if (qty >= min && qty <= max) return qty;
   }
 
-  throw invalid(`qty debe ser un entero entre 0 y ${MAX_QTY}.`);
+  throw new AppError('MOCK_INVALID_QTY');
 }
 
 export function getMockUsers(qty) {
@@ -54,32 +49,32 @@ function linkOrderStatuses(orders, deliveries) {
 
 function seedCounts(qty, body) {
   if (body !== undefined && (body === null || typeof body !== 'object' || Array.isArray(body))) {
-    throw invalid('Enviá un objeto JSON con cantidades.');
+    throw new AppError('MOCK_INVALID_SEED_REQUEST');
   }
   if (qty !== undefined && body && Object.keys(body).length > 0) {
-    throw invalid('Usá qty o un body con cantidades, sin combinar los dos formatos.');
+    throw new AppError('MOCK_INVALID_SEED_REQUEST');
   }
   if (body && Object.keys(body).some(field => !batchFields.includes(field))) {
-    throw invalid('Los campos admitidos son users, couriers, orders y deliveries.');
+    throw new AppError('MOCK_INVALID_SEED_REQUEST');
   }
 
-  const uniformCount = qty === undefined ? undefined : parseQty(qty);
+  const uniformCount = qty === undefined ? undefined : parseQty(qty, 1, MAX_QTY / batchFields.length);
   const counts = Object.fromEntries(batchFields.map(field => [
     field, uniformCount ?? (Object.hasOwn(body ?? {}, field) ? body[field] : 0),
   ]));
   const values = Object.values(counts);
   if (values.some(value => !Number.isSafeInteger(value) || value < 0)) {
-    throw invalid('Las cantidades deben ser enteros no negativos.');
+    throw new AppError('MOCK_INVALID_SEED_REQUEST');
   }
   const total = values.reduce((sum, value) => sum + value, 0);
   if (total < 1 || total > MAX_QTY) {
-    throw invalid(`El lote debe contener entre 1 y ${MAX_QTY} documentos en total.`);
+    throw new AppError('MOCK_INVALID_SEED_REQUEST');
   }
   if (counts.orders > 0 && counts.users === 0) {
-    throw invalid('Para generar pedidos, incluí al menos un usuario.');
+    throw new AppError('MOCK_INVALID_SEED_RELATIONS');
   }
   if (counts.deliveries > counts.orders || (counts.deliveries > 0 && counts.couriers === 0)) {
-    throw invalid('Las entregas requieren un pedido distinto por entrega y al menos un repartidor.');
+    throw new AppError('MOCK_INVALID_SEED_RELATIONS');
   }
   return counts;
 }

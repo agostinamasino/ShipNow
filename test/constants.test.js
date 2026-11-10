@@ -49,7 +49,7 @@ for (const [value, expected] of [
 for (const value of [null, '', 'true', 'false', 'unknown', 0, 1, {}, []]) {
   test(`service rechaza status ${JSON.stringify(value)}`, async () => {
     await assert.rejects(createProduct({ name: 'Caja', price: 1, status: value }),
-      { name: 'ProductValidationError' });
+      { name: 'AppError', code: 'PRODUCT_INVALID_STATUS' });
   });
 }
 
@@ -80,6 +80,6 @@ test('User: default y enum de roles en el modelo', async () => {
 for (const role of [null, '', 'unknown', true, 1, {}, []]) {
   test(`service rechaza role ${JSON.stringify(role)}`, async () => {
     await assert.rejects(createUser({ name: 'Ana', email: 'ana@example.com', role }),
-      { name: 'UserValidationError' });
+      { name: 'AppError', code: 'USER_INVALID_ROLE' });
   });
 }

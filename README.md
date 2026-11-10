@@ -1,7 +1,19 @@
 # ShipNow
 
 API académica de Backend 3 con Node.js, Express y MongoDB/Mongoose.
-Products y Users utilizan Router → Controller → Service → Repository.
+Products, Users y mocks siguen la arquitectura por capas.
+
+| Capa | Responsabilidad |
+| --- | --- |
+| Router | Define los endpoints y delega en el controller. |
+| Controller | Lee la solicitud y construye la respuesta exitosa. Express 5 propaga las excepciones y los rechazos al middleware global. |
+| Service | Aplica las reglas de negocio y detecta errores conocidos mediante `AppError`. |
+| Repository | Concentra las operaciones de persistencia con Mongoose. Las vistas previas de mocks se generan en memoria. |
+| Model | Define el esquema, las validaciones de persistencia y las referencias. |
+| Middleware global | Construye las respuestas de error usando el catálogo centralizado. |
+
+Separar Service y Repository permite probar las reglas de negocio con la
+persistencia simulada y mantiene las consultas a MongoDB aisladas de esas reglas.
 
 En Products, el router define los endpoints; el controller maneja HTTP; el service
 valida la entrada, selecciona los campos de creación y traduce los errores de
@@ -28,6 +40,10 @@ ningún documento: el POST devuelve 500 y se debe revisar el índice/datos exist
 2. Configurar `.env` en la raíz. Si falta, copiar `.env.example` a `.env`.
 3. Iniciar MongoDB local o configurar una conexión de MongoDB Atlas.
 4. Ejecutar `npm run dev` (reinicio automático) o `npm start`.
+
+Si todavía no existe `.env`, desde la raíz del proyecto usá
+`Copy-Item .env.example .env` en PowerShell o `cp .env.example .env` en
+Linux/macOS. Después configurá los valores para tu entorno.
 
 ```dotenv
 MONGODB_URI=mongodb://127.0.0.1:27017/shipnow
@@ -255,8 +271,9 @@ Ejemplo completo de HTTP 201 para `POST /api/mocks/seed?qty=1`.
 }
 ```
 
-El seed usa una sola transacción y requiere un MongoDB que las admita, como un
-cluster de Atlas o un replica set. Un fallo aborta el lote. Las entradas inválidas
+El seed requiere MongoDB Atlas o un replica set con soporte transaccional.
+Usa una sola transacción para todo el lote. Un fallo de inserción revierte
+el lote completo. Las entradas inválidas
 devuelven **400**, una conexión no disponible o sin soporte transaccional **503**
 y un fallo inesperado **500**. Los GET de vistas previas funcionan independientemente.
 
@@ -267,7 +284,7 @@ ejemplos). Para las vistas previas alcanza con que el servidor esté escuchando.
 Para ejecutar el seed, apuntá la configuración a una base de prueba con soporte
 de transacciones y esperá a que el servidor confirme la conexión.
 
-```sh
+```powershell
 curl.exe "http://localhost:3000/api/mocks/users?qty=2"
 curl.exe "http://localhost:3000/api/mocks/couriers?qty=2"
 curl.exe "http://localhost:3000/api/mocks/orders?qty=2"
@@ -275,5 +292,87 @@ curl.exe "http://localhost:3000/api/mocks/deliveries?qty=1"
 curl.exe -X POST "http://localhost:3000/api/mocks/seed?qty=1"
 ```
 
+En Linux/macOS, usá los mismos comandos reemplazando `curl.exe` por `curl`.
+
 También podés enviar esas solicitudes desde Postman o Thunder Client. Para probar
 el formato con body, usá POST sin `qty` y pegá el ejemplo de cantidades como JSON.
+
+## Respuestas de error
+
+El middleware global usa el catálogo de `src/errors/error.catalog.js`. El status
+viaja en la respuesta HTTP. En el JSON, `error.code` identifica el error de forma
+estable y `error.message` contiene el mensaje público. Algunas validaciones
+incluyen `error.details.fields` con nombres de campos permitidos.
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "PRODUCT_VALIDATION_FAILED",
+    "message": "Revisá los campos del producto.",
+    "details": { "fields": ["price"] }
+  }
+}
+```
+
+| Código | HTTP | Situación |
+| --- | --- | --- |
+| `INVALID_JSON` | 400 | El parser rechaza el cuerpo como JSON. |
+| `ROUTE_NOT_FOUND` | 404 | Ninguna ruta responde al método y la URL solicitados. |
+| `PRODUCT_VALIDATION_FAILED` | 400 | El cuerpo o los campos del producto son inválidos. |
+| `PRODUCT_INVALID_STATUS` | 400 | El estado enviado al crear un producto es inválido. |
+| `USER_VALIDATION_FAILED` | 400 | El cuerpo o los campos del usuario son inválidos. |
+| `USER_INVALID_ROLE` | 400 | El rol enviado al crear un usuario es inválido. |
+| `USER_EMAIL_ALREADY_EXISTS` | 409 | El correo ya existe o se produce una colisión con el índice de email al guardar. |
+| `MOCK_INVALID_QTY` | 400 | `qty` es inválido, está repetido o queda fuera del rango del endpoint. |
+| `MOCK_INVALID_SEED_REQUEST` | 400 | El body o las cantidades del seed son inválidos, o se combinan cantidades del body con `qty`. |
+| `MOCK_INVALID_SEED_RELATIONS` | 400 | Faltan usuarios para los pedidos o faltan pedidos distintos o repartidores para las entregas. |
+| `MOCK_SEED_UNAVAILABLE` | 503 | MongoDB no está disponible para el seed o rechaza la operación transaccional por falta de soporte. |
+| `INTERNAL_ERROR` | 500 | Fallo inesperado. El mensaje público es genérico. |
+
+El ejemplo anterior corresponde a HTTP 400 al enviar un producto con `price`
+inválido. Estos son otros cuerpos completos que devuelve la API.
+
+| Caso | HTTP | JSON |
+| --- | --- | --- |
+| Correo duplicado | 409 | `{"success":false,"error":{"code":"USER_EMAIL_ALREADY_EXISTS","message":"Ya existe un usuario con ese correo electrónico."}}` |
+| Cantidad inválida en mocks | 400 | `{"success":false,"error":{"code":"MOCK_INVALID_QTY","message":"Revisá el rango de qty para esta operación."}}` |
+| Seed con relaciones inválidas | 400 | `{"success":false,"error":{"code":"MOCK_INVALID_SEED_RELATIONS","message":"El lote no cumple las dependencias entre entidades."}}` |
+| MongoDB no disponible para el seed | 503 | `{"success":false,"error":{"code":"MOCK_SEED_UNAVAILABLE","message":"El seed requiere una conexión MongoDB con soporte para transacciones."}}` |
+| Ruta inexistente | 404 | `{"success":false,"error":{"code":"ROUTE_NOT_FOUND","message":"La ruta solicitada no existe."}}` |
+| Fallo inesperado | 500 | `{"success":false,"error":{"code":"INTERNAL_ERROR","message":"Error interno del servidor."}}` |
+
+### Probar los errores
+
+Con el servidor en ejecución, ajustá el puerto si corresponde. Para el 409,
+usá un correo ya registrado en tu base de prueba. Para el 503, ejecutá el comando
+indicado contra una instancia de ShipNow que esté escuchando con MongoDB desconectado.
+El caso 500 usa una prueba automatizada que simula un fallo de persistencia.
+
+**PowerShell**
+
+```powershell
+$base = 'http://localhost:3000'
+$email = 'ana@example.com' # Reemplazalo por un correo existente en tu base de prueba
+'{"name":"Caja","price":"invalido"}' | curl.exe -i "$base/api/products" -H 'Content-Type: application/json' --data-binary '@-'
+@{ name = 'Ana'; email = $email } | ConvertTo-Json -Compress | curl.exe -i "$base/api/users" -H 'Content-Type: application/json' --data-binary '@-'
+curl.exe -i "$base/api/mocks/users?qty=-1"
+'{"orders":1}' | curl.exe -i "$base/api/mocks/seed" -H 'Content-Type: application/json' --data-binary '@-'
+curl.exe -i -X POST "$base/api/mocks/seed?qty=1" # Ejecutar con MongoDB desconectado
+curl.exe -i "$base/api/no-existe"
+node --test --test-name-pattern 'Products propaga errores de escritura' test/product-user-errors.test.js
+```
+
+**Linux/macOS**
+
+```sh
+base='http://localhost:3000'
+curl -i "$base/api/products" -H 'Content-Type: application/json' --data '{"name":"Caja","price":"invalido"}'
+# Reemplazá ana@example.com por un correo existente en tu base de prueba
+curl -i "$base/api/users" -H 'Content-Type: application/json' --data '{"name":"Ana","email":"ana@example.com"}'
+curl -i "$base/api/mocks/users?qty=-1"
+curl -i "$base/api/mocks/seed" -H 'Content-Type: application/json' --data '{"orders":1}'
+curl -i -X POST "$base/api/mocks/seed?qty=1" # Ejecutar con MongoDB desconectado
+curl -i "$base/api/no-existe"
+node --test --test-name-pattern 'Products propaga errores de escritura' test/product-user-errors.test.js
+```

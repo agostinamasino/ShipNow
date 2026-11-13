@@ -1,5 +1,6 @@
 import { AppError } from '../errors/app-error.js';
 import { ERROR_CATALOG } from '../errors/error.catalog.js';
+import logger from '../config/logger.js';
 
 export function errorMiddleware(err, req, res, next) {
   if (res.headersSent) return next(err);
@@ -12,6 +13,9 @@ export function errorMiddleware(err, req, res, next) {
   } else if (err?.type === 'entity.too.large' && err.status === 413) {
     entry = ERROR_CATALOG.PAYLOAD_TOO_LARGE;
   }
+
+  const severity = entry.code === 'INTERNAL_ERROR' ? 'error' : 'warning';
+  logger[severity](`HTTP_ERROR code=${entry.code} status=${entry.status}`);
 
   const error = { code: entry.code, message: entry.message };
   if (err instanceof AppError && err.details && entry.code !== 'INTERNAL_ERROR') {

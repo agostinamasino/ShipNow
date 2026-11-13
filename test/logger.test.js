@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -135,6 +135,56 @@ test('la rotación configura fecha diaria, tamaño y retención', async (t) => {
   assert.equal(transport.options.maxSize, '10m');
   assert.equal(transport.options.maxFiles, '14d');
   assert.equal(transport.level, 'error');
+});
+
+test('el transporte real rota al superar 10 MB y conserva todos los eventos JSON', async (t) => {
+  const { logger, directory } = await isolatedLogger(t, 'test');
+  const file = logger.transports.find(transport => transport instanceof DailyRotateFile);
+  const rotations = [];
+  file.on('rotate', (previous, current) => rotations.push({ previous, current }));
+  const total = 12000;
+  for (let index = 0; index < total; index++) logger.error('SIZE_ROTATION ' + 'x'.repeat(900));
+  await closeLogger(logger);
+  const persisted = await records(directory, total);
+  assert.equal(persisted.length, total);
+  assert.ok(persisted.every(record => record.level === 'error'));
+  assert.ok(rotations.length >= 1);
+  const files = (await readdir(directory)).filter(name => /^errors-.*\.log/.test(name));
+  assert.ok(files.length >= 2);
+  const sizes = await Promise.all(files.map(name => stat(join(directory, name))));
+  assert.ok(sizes.some(file => file.size > 10 * 1024 * 1024));
+  // La rotación se evalúa al escribir el siguiente evento; se admite ese margen.
+  assert.ok(sizes.every(file => file.size <= 10 * 1024 * 1024 + 2048));
+});
+
+test('el transporte real rota por fecha y elimina archivos con más de 14 días usando reloj simulado', async (t) => {
+  let now = Date.UTC(2035, 0, 1, 12);
+  t.mock.method(Date, 'now', () => now);
+  const { logger, directory } = await isolatedLogger(t, 'test');
+  const file = logger.transports.find(transport => transport instanceof DailyRotateFile);
+  const rotations = [];
+  const removed = [];
+  file.on('rotate', (previous, current) => rotations.push({ previous, current }));
+  file.on('logRemoved', filename => removed.push(filename));
+  logger.error('DAY_ONE');
+  await records(directory, 1);
+  now += 24 * 60 * 60 * 1000;
+  logger.fatal('DAY_TWO');
+  await records(directory, 2);
+  assert.equal(rotations.length, 1);
+  assert.notEqual(rotations[0].previous, rotations[0].current);
+  now += 15 * 24 * 60 * 60 * 1000;
+  logger.error('DAY_SEVENTEEN');
+  await closeLogger(logger);
+  const persisted = await records(directory, 1);
+  assert.deepEqual(persisted.map(record => record.message), ['DAY_SEVENTEEN']);
+  assert.equal(rotations.length, 2);
+  assert.equal(removed.length, 2);
+  for (const filename of removed) assert.equal(existsSync(filename), false);
+  const auditName = (await readdir(directory)).find(name => name.endsWith('-audit.json'));
+  const audit = JSON.parse(await readFile(join(directory, auditName), 'utf8'));
+  assert.deepEqual(audit.keep, { days: true, amount: 14 });
+  assert.equal(audit.files.length, 1);
 });
 
 test('consola y archivos omiten metadata, errores, URI, emails y credenciales reconocibles', async (t) => {

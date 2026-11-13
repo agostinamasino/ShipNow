@@ -362,7 +362,7 @@ curl.exe -i "$base/api/mocks/users?qty=-1"
 '{"orders":1}' | curl.exe -i "$base/api/mocks/seed" -H 'Content-Type: application/json' --data-binary '@-'
 curl.exe -i -X POST "$base/api/mocks/seed?qty=1" # Ejecutar con MongoDB desconectado
 curl.exe -i "$base/api/no-existe"
-node --test --test-name-pattern 'Products propaga errores de escritura' test/product-user-errors.test.js
+npm test -- --test-name-pattern 'Products propaga errores de escritura'
 ```
 
 **Linux/macOS**
@@ -376,5 +376,172 @@ curl -i "$base/api/mocks/users?qty=-1"
 curl -i "$base/api/mocks/seed" -H 'Content-Type: application/json' --data '{"orders":1}'
 curl -i -X POST "$base/api/mocks/seed?qty=1" # Ejecutar con MongoDB desconectado
 curl -i "$base/api/no-existe"
-node --test --test-name-pattern 'Products propaga errores de escritura' test/product-user-errors.test.js
+npm test -- --test-name-pattern 'Products propaga errores de escritura'
 ```
+
+## Logging y monitoreo básico
+
+ShipNow usa `winston` y `winston-daily-rotate-file`. La instancia compartida está
+en `src/config/logger.js`, consume `config.nodeEnv` de `src/config/index.js` y se
+importa en servidor, middlewares, services y controller de demostración.
+`createAppLogger` permite crear instancias aisladas para pruebas.
+
+| Nivel | Prioridad | Propósito |
+| --- | --- | --- |
+| `fatal` | 0 | Fallo del servidor HTTP que impide escuchar. El endpoint de demostración también emite un evento identificado como prueba. |
+| `error` | 1 | Error inesperado o fallo de conexión inicial a MongoDB mientras el servidor sigue disponible parcialmente. |
+| `warning` | 2 | Error conocido de validación, conflicto, ruta inexistente o indisponibilidad temporal del seed. |
+| `info` | 3 | Arranque, conexión establecida, creación de producto o usuario e inicio y confirmación del seed. |
+| `http` | 4 | Resumen de una solicitud completada. |
+| `debug` | 5 | Cantidades de resultados de listados y generación de vistas previas. |
+
+Un número menor representa mayor severidad. `LOG_LEVELS` está congelado mediante
+`Object.freeze` y define exactamente estos seis niveles, incluido `warning`.
+
+| Entorno | Consola | Archivos |
+| --- | --- | --- |
+| `development` | Seis niveles, timestamp, nivel y mensaje legibles, con colores. | `error` y `fatal` en JSON. |
+| `production` | Desde `http` hasta `fatal`, en JSON. Se excluye `debug`. | `error` y `fatal` en JSON. |
+| `test` | Instancia predeterminada silenciosa. | Sin transporte de archivos por defecto. Las pruebas usan carpetas temporales y transportes aislados. |
+
+### Archivos, rotación y protección de datos
+
+Los archivos se guardan en `logs/errors-%DATE%.log`, dentro de la raíz del
+proyecto. Cada línea contiene JSON válido con `timestamp`, `level` y `message`.
+
+```json
+{"timestamp":"2026-11-13T12:00:00.000Z","level":"error","message":"MONGODB_CONNECTION_FAILED"}
+```
+
+El transporte tiene `datePattern: 'YYYY-MM-DD'`, `maxSize: '10m'` (10 MB) y
+`maxFiles: '14d'` (14 días). Rota automáticamente al cambiar el día o superar el
+tamaño. El cambio se comprueba al escribir un evento, por lo que el archivo puede
+superar el umbral en el tamaño de un registro. Durante la rotación se aplica la
+retención mediante el archivo de auditoría que mantiene el transporte.
+El mecanismo trabaja con los archivos generados, sin intervención manual.
+
+El umbral `error` y un filtro explícito admiten exclusivamente `error` y `fatal`
+en archivos. `debug`, `http`, `info` y `warning` quedan fuera, aunque aparezcan en
+consola según el entorno. `.gitignore` excluye toda la carpeta `logs/`, incluidos
+archivos rotados y archivos de auditoría.
+
+La aplicación usa mensajes fijos y cantidades controladas. El formato descarta
+metadatos, documentos, cuerpos y objetos Error, y sanitiza patrones reconocibles
+de URI, correos y credenciales. Los puntos de logging deben seguir enviando
+únicamente mensajes controlados, pues la sanitización no identifica cualquier
+secreto arbitrario dentro de texto libre. Ante fallos de transporte se emite una
+advertencia fija a stderr una sola vez por instancia, fuera de Winston para
+evitar recursión.
+
+### Eventos de la aplicación
+
+| Origen | Evento y nivel |
+| --- | --- |
+| Arranque | `SERVER_LISTENING` en `info`. |
+| MongoDB | `MONGODB_CONNECTED` en `info` o `MONGODB_CONNECTION_FAILED` en `error`. |
+| Servidor HTTP | `SERVER_LISTEN_FAILED` en `fatal`, con código de salida 1. |
+| Middleware global | `HTTP_ERROR code=... status=...` en `warning` para errores conocidos o `error` para `INTERNAL_ERROR`. |
+| Solicitudes | Un `HTTP_REQUEST method=... route=... status=... durationMs=...` en `http` al finalizar la respuesta. |
+| Products | `PRODUCT_CREATED` en `info`, `PRODUCTS_LISTED count=...` en `debug`. |
+| Users | `USER_CREATED` en `info`, `USERS_LISTED count=...` en `debug`. |
+| GET de mocks | `MOCK_PREVIEW entity=... qty=...` en `debug`, una vez por vista previa solicitada. |
+| Seed | `MOCK_SEED_STARTED users=... couriers=... orders=... deliveries=...` en `info`, tras validar las cantidades. |
+| Seed confirmado | `MOCK_SEED_COMPLETED users=... couriers=... orders=... deliveries=...` en `info`, después del commit. |
+
+Los services registran éxitos. El middleware global registra la clasificación de
+los errores y mantiene el formato HTTP del Módulo 3, con `success: false` y
+`error.code`/`error.message`. Una operación fallida no anuncia éxito.
+El evento del seed confirmado se emite fuera del callback transaccional para
+evitar duplicaciones durante reintentos. La disponibilidad del seed sigue
+requiriendo MongoDB con soporte transaccional.
+
+Los resúmenes HTTP contienen únicamente método, plantilla de ruta, status y
+duración. Para rutas inexistentes o solicitudes rechazadas por el parser antes
+de resolver una ruta, usan `UNMATCHED_ROUTE`. Se conservan etiquetas estáticas de
+los prefijos conocidos. Al agregar nuevos routers debe revisarse esa lista.
+El resumen HTTP y la clasificación de error son eventos diferentes, uno por
+solicitud completada y otro por error, respectivamente.
+
+### Demostración de los seis niveles
+
+`GET /api/logger-test` se registra solamente en `development`. Devuelve HTTP 200
+con el siguiente cuerpo y emite `LOGGER_DEMO_DEBUG`, `LOGGER_DEMO_HTTP`,
+`LOGGER_DEMO_INFO`, `LOGGER_DEMO_WARNING`, `LOGGER_DEMO_ERROR` y `LOGGER_DEMO_FATAL`.
+El fatal de demostración permite que el servidor siga atendiendo solicitudes.
+Los eventos de demostración `error` y `fatal` se guardan en los archivos rotativos.
+Además se registra el resumen HTTP normal de la solicitud.
+
+```json
+{"status":"ok"}
+```
+
+En `production` y `test`, la ruta responde HTTP 404 mediante el middleware global.
+
+```json
+{"success":false,"error":{"code":"ROUTE_NOT_FOUND","message":"La ruta solicitada no existe."}}
+```
+
+Para probar desde PowerShell, iniciá el servidor en una terminal y ejecutá las
+solicitudes en otra. Ajustá el puerto si corresponde. La variable de entorno
+del proceso tiene precedencia sobre `.env`.
+
+```powershell
+# Terminal del servidor
+$env:NODE_ENV = 'development'
+npm start
+# Otra terminal
+curl.exe -i 'http://localhost:3000/api/logger-test'
+curl.exe -i 'http://localhost:3000/health'
+```
+
+En Linux/macOS se puede seleccionar el entorno para el proceso con este comando.
+
+```sh
+# Terminal del servidor
+NODE_ENV=development npm start
+# Otra terminal
+curl -i 'http://localhost:3000/api/logger-test'
+curl -i 'http://localhost:3000/health'
+```
+
+Para verificar el 404 de producción, detené el proceso y repetí el arranque usando
+`production` en lugar de `development`. Lo mismo aplica a `test`, donde el logger
+predeterminado será silencioso.
+
+### Verificar niveles persistidos y ejecutar pruebas
+
+Después de una llamada de demostración en desarrollo, los siguientes comandos
+leen todos los archivos de errores, incluidos los rotados por tamaño. Los campos
+de cada línea deben ser `timestamp`, `level` y `message`.
+
+```powershell
+$records = @(Get-ChildItem './logs/errors-*.log*' | Get-Content | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+$records | Group-Object level | Select-Object Name, Count
+if (@($records | Where-Object { $_.level -notin @('error', 'fatal') }).Count -gt 0) { throw 'Nivel inesperado en archivos de errores' }
+npm test
+```
+
+En Linux/macOS se usa Node.js para leer el JSON, sin herramientas adicionales.
+
+```sh
+node --input-type=module <<'JS'
+import fs from 'node:fs';
+const files = fs.readdirSync('logs').filter(name => /^errors-.*\.log(?:\.\d+)?$/.test(name));
+const records = files.flatMap(name => fs.readFileSync('logs/' + name, 'utf8').split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line)));
+if (records.some(record => !['error', 'fatal'].includes(record.level))) throw new Error('Nivel inesperado');
+console.log(records.map(({ level, message }) => ({ level, message })));
+JS
+npm test
+```
+
+`npm test` carga `test-support/setup.js` antes de importar la aplicación y fija
+un entorno de prueba aislado. Usá ese script también al seleccionar pruebas con
+`npm test -- --test-name-pattern 'logger'`. La suite comprueba la ausencia de
+archivos nuevos en la carpeta real `logs/` y cierra los transportes de pruebas.
+
+Las pruebas de persistencia escriben JSON real en carpetas temporales. Las de
+rotación generan más de 10 MB y simulan el reloj para verificar cambios de fecha
+y la eliminación de archivos con más de 14 días, usando el transporte real.
+Las carpetas temporales se eliminan al finalizar. Las pruebas HTTP simulan
+MongoDB y el transporte del endpoint de demostración para cubrir los tres
+entornos sin escribir archivos en el repositorio.

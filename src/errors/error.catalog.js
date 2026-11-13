@@ -1,5 +1,6 @@
 const entries = [
   ['INVALID_JSON', 'El cuerpo debe ser JSON válido.', 400],
+  ['PAYLOAD_TOO_LARGE', 'El cuerpo de la solicitud supera el tamaño permitido.', 413],
   ['ROUTE_NOT_FOUND', 'La ruta solicitada no existe.', 404],
   ['PRODUCT_VALIDATION_FAILED', 'Revisá los campos del producto.', 400],
   ['PRODUCT_INVALID_STATUS', 'El estado del producto no es válido.', 400],

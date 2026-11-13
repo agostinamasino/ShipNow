@@ -31,7 +31,7 @@ async function assertHttpError(response, code, details) {
 
 test('el catálogo congela el diccionario y cada definición pública', () => {
   const statuses = {
-    INVALID_JSON: 400, ROUTE_NOT_FOUND: 404, PRODUCT_VALIDATION_FAILED: 400,
+    INVALID_JSON: 400, PAYLOAD_TOO_LARGE: 413, ROUTE_NOT_FOUND: 404, PRODUCT_VALIDATION_FAILED: 400,
     PRODUCT_INVALID_STATUS: 400, USER_VALIDATION_FAILED: 400, USER_INVALID_ROLE: 400,
     USER_EMAIL_ALREADY_EXISTS: 409, MOCK_INVALID_QTY: 400, MOCK_INVALID_SEED_REQUEST: 400,
     MOCK_INVALID_SEED_RELATIONS: 400, MOCK_SEED_UNAVAILABLE: 503, INTERNAL_ERROR: 500,
@@ -74,6 +74,24 @@ test('si los encabezados ya salieron, el middleware delega el mismo error', () =
   let forwarded;
   errorMiddleware(err, {}, { headersSent: true }, error => { forwarded = error; });
   assert.equal(forwarded, err);
+});
+
+test('solo el error específico del parser se clasifica como payload excedido', () => {
+  for (const err of [
+    Object.assign(new Error(marker), { status: 413 }),
+    Object.assign(new Error(marker), { type: 'entity.too.large', status: 500 }),
+  ]) {
+    const res = {
+      status(code) { this.statusCode = code; return this; },
+      json(body) { this.body = body; },
+    };
+    errorMiddleware(err, {}, res, () => assert.fail('No debe delegar'));
+    assert.equal(res.statusCode, 500);
+    assert.deepEqual(res.body, {
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: ERROR_CATALOG.INTERNAL_ERROR.message },
+    });
+  }
 });
 
 test('Express 5 propaga excepciones síncronas y rechazos asíncronos al middleware', async (t) => {
@@ -125,6 +143,29 @@ test('el servidor aplica el parser, 404 y middleware global, y conserva las ruta
   });
 
   await assertHttpError(await request('/api/products', `{"name":"${marker}"`), 'INVALID_JSON');
+  await t.test('el parser rechaza más de 100 KB en Products, Users y seed sin filtrar detalles', async () => {
+    const payload = JSON.stringify({ name: marker, description: 'x'.repeat(101 * 1024) });
+    assert.ok(Buffer.byteLength(payload) > 100 * 1024);
+    const writes = [Product.create, User.prototype.save, User.collection.createIndex];
+    const countsBefore = writes.map(write => write.mock.callCount());
+    for (const path of ['/api/products', '/api/users', '/api/mocks/seed?qty=1']) {
+      const response = await request(path, payload);
+      assert.equal(response.status, 413);
+      assert.match(response.headers.get('content-type'), /^application\/json\b/);
+      const text = await response.text();
+      assert.deepEqual(JSON.parse(text), {
+        success: false,
+        error: {
+          code: 'PAYLOAD_TOO_LARGE',
+          message: 'El cuerpo de la solicitud supera el tamaño permitido.',
+        },
+      });
+      for (const internal of [marker, 'stack', 'entity.too.large', 'limit', 'length', 'PayloadTooLargeError']) {
+        assert.ok(!text.includes(internal));
+      }
+    }
+    assert.deepEqual(writes.map(write => write.mock.callCount()), countsBefore);
+  });
   await assertHttpError(await request('/api/no-existe'), 'ROUTE_NOT_FOUND');
   const health = await request('/health');
   assert.equal(health.status, 200);

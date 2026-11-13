@@ -318,6 +318,7 @@ incluyen `error.details.fields` con nombres de campos permitidos.
 | Código | HTTP | Situación |
 | --- | --- | --- |
 | `INVALID_JSON` | 400 | El parser rechaza el cuerpo como JSON. |
+| `PAYLOAD_TOO_LARGE` | 413 | El cuerpo JSON supera el límite de 100 KB de `express.json()`. |
 | `ROUTE_NOT_FOUND` | 404 | Ninguna ruta responde al método y la URL solicitados. |
 | `PRODUCT_VALIDATION_FAILED` | 400 | El cuerpo o los campos del producto son inválidos. |
 | `PRODUCT_INVALID_STATUS` | 400 | El estado enviado al crear un producto es inválido. |
@@ -341,6 +342,7 @@ inválido. Estos son otros cuerpos completos que devuelve la API.
 | MongoDB no disponible para el seed | 503 | `{"success":false,"error":{"code":"MOCK_SEED_UNAVAILABLE","message":"El seed requiere una conexión MongoDB con soporte para transacciones."}}` |
 | Ruta inexistente | 404 | `{"success":false,"error":{"code":"ROUTE_NOT_FOUND","message":"La ruta solicitada no existe."}}` |
 | Fallo inesperado | 500 | `{"success":false,"error":{"code":"INTERNAL_ERROR","message":"Error interno del servidor."}}` |
+| Cuerpo JSON mayor a 100 KB | 413 | `{"success":false,"error":{"code":"PAYLOAD_TOO_LARGE","message":"El cuerpo de la solicitud supera el tamaño permitido."}}` |
 
 ### Probar los errores
 

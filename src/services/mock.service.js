@@ -3,6 +3,7 @@ import { USER_ROLES, ORDER_STATUS, DELIVERY_STATUS } from '../constants/index.js
 import { generatePeople, generateOrders, generateDeliveries } from './mock.generator.js';
 import { insertMockBatch } from '../repositories/mock.repository.js';
 import { AppError } from '../errors/app-error.js';
+import logger from '../config/logger.js';
 
 const DEFAULT_QTY = 10;
 const MAX_QTY = 100;
@@ -20,23 +21,35 @@ function parseQty(value, min = 0, max = MAX_QTY) {
 }
 
 export function getMockUsers(qty) {
-  return { users: generatePeople(parseQty(qty), USER_ROLES.USER) };
+  const users = generatePeople(parseQty(qty), USER_ROLES.USER);
+  logger.debug(`MOCK_PREVIEW entity=users qty=${users.length}`);
+  return { users };
 }
 
 export function getMockCouriers(qty) {
-  return { couriers: generatePeople(parseQty(qty), USER_ROLES.COURIER) };
+  const couriers = generatePeople(parseQty(qty), USER_ROLES.COURIER);
+  logger.debug(`MOCK_PREVIEW entity=couriers qty=${couriers.length}`);
+  return { couriers };
 }
 
-export function getMockOrders(qty) {
-  const { users } = getMockUsers(qty);
+function orderPreview(qty) {
+  const users = generatePeople(parseQty(qty), USER_ROLES.USER);
   return { orders: generateOrders(users), users };
 }
 
+export function getMockOrders(qty) {
+  const result = orderPreview(qty);
+  logger.debug(`MOCK_PREVIEW entity=orders qty=${result.orders.length}`);
+  return result;
+}
+
 export function getMockDeliveries(qty) {
-  const { orders, users } = getMockOrders(qty);
+  const { orders, users } = orderPreview(qty);
   const couriers = generatePeople(orders.length, USER_ROLES.COURIER);
   const deliveries = generateDeliveries(orders, couriers);
-  return { deliveries, orders: linkOrderStatuses(orders, deliveries), users, couriers };
+  const result = { deliveries, orders: linkOrderStatuses(orders, deliveries), users, couriers };
+  logger.debug(`MOCK_PREVIEW entity=deliveries qty=${deliveries.length}`);
+  return result;
 }
 
 function linkOrderStatuses(orders, deliveries) {
@@ -81,6 +94,7 @@ function seedCounts(qty, body) {
 
 export async function seedMocks(qty, body) {
   const counts = seedCounts(qty, body);
+  logger.info(`MOCK_SEED_STARTED ${batchFields.map(field => `${field}=${counts[field]}`).join(' ')}`);
   const batchId = randomUUID();
   const users = generatePeople(counts.users, USER_ROLES.USER, batchId);
   const couriers = generatePeople(counts.couriers, USER_ROLES.COURIER, batchId);
@@ -88,5 +102,6 @@ export async function seedMocks(qty, body) {
   const orders = generateOrders(customers);
   const deliveries = generateDeliveries(orders.slice(0, counts.deliveries), couriers);
   const ids = await insertMockBatch({ users, couriers, orders: linkOrderStatuses(orders, deliveries), deliveries });
+  logger.info(`MOCK_SEED_COMPLETED ${batchFields.map(field => `${field}=${ids[field].length}`).join(' ')}`);
   return { batchId, counts, ids };
 }

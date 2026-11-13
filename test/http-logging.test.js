@@ -101,7 +101,7 @@ test('resúmenes HTTP y errores 400/404/409/413/500/503 usan datos controlados y
     assert.deepEqual(await response.json(), { success: false, error });
 
     const summaries = events.filter(event => event.level === 'http');
-    const failures = events.filter(event => event.level !== 'http');
+    const failures = events.filter(event => ['warning', 'error', 'fatal'].includes(event.level));
     assert.equal(summaries.length, 1, code);
     assert.equal(failures.length, 1, code);
     assert.equal(summaries[0].args.length, 1);

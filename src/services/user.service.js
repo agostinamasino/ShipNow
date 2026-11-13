@@ -1,9 +1,12 @@
 import * as userRepository from '../repositories/user.repository.js';
 import { USER_ROLES } from '../constants/index.js';
 import { AppError } from '../errors/app-error.js';
+import logger from '../config/logger.js';
 
-export function getUsers() {
-  return userRepository.findAll();
+export async function getUsers() {
+  const users = await userRepository.findAll();
+  logger.debug(`USERS_LISTED count=${users.length}`);
+  return users;
 }
 
 export async function createUser(data) {
@@ -22,7 +25,9 @@ export async function createUser(data) {
     throw new AppError('USER_EMAIL_ALREADY_EXISTS');
   }
   try {
-    return await userRepository.create({ name, email, role });
+    const user = await userRepository.create({ name, email, role });
+    logger.info('USER_CREATED');
+    return user;
   } catch (error) {
     if (error.name === 'ValidationError') {
       throw new AppError('USER_VALIDATION_FAILED', {

@@ -1,7 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import logger from '../config/logger.js';
 
-const routePrefixes = ['/api/products', '/api/users', '/api/mocks'];
+const routePrefixes = ['/api/products', '/api/users', '/api/mocks', '/api/logger-test'];
 const httpMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'CONNECT', 'TRACE'];
 
 function routeTemplate(req, prefix) {

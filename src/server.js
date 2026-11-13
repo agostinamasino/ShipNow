@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import productsRouter from './routes/products.routes.js';
 import usersRouter from './routes/users.routes.js';
 import mocksRouter from './routes/mocks.routes.js';
+import loggerRouter from './routes/logger.routes.js';
 import { notFound } from './middlewares/not-found.middleware.js';
 import { errorMiddleware } from './middlewares/error.middleware.js';
 import { httpLogger } from './middlewares/http-logger.middleware.js';
@@ -16,6 +17,9 @@ app.use(express.json());
 app.use('/api/products', productsRouter);
 app.use('/api/users', usersRouter);
 app.use('/api/mocks', mocksRouter);
+if (config.nodeEnv === 'development') {
+  app.use('/api/logger-test', loggerRouter);
+}
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });

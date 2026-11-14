@@ -9,6 +9,8 @@ import { notFound } from './middlewares/not-found.middleware.js';
 import { errorMiddleware } from './middlewares/error.middleware.js';
 import { httpLogger } from './middlewares/http-logger.middleware.js';
 import logger from './config/logger.js';
+import swaggerUi from 'swagger-ui-express';
+import openapi from './config/swagger.js';
 
 const app = express();
 
@@ -24,6 +26,10 @@ if (config.nodeEnv === 'development') {
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
+
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openapi, {
+  swaggerOptions: { validatorUrl: null },
+}));
 
 app.use(notFound);
 app.use(errorMiddleware);

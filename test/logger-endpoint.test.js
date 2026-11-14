@@ -44,8 +44,11 @@ for (const nodeEnv of ['development', 'production', 'test']) {
         });
         const body = await response.json();
         const health = await fetch(origin + '/health');
+        const docs = await fetch(origin + '/api/docs');
+        const docsHtml = await docs.text();
         console.log(JSON.stringify({
           status: response.status, body, events, health: await health.json(),
+          docs: { status: docs.status, html: docsHtml.includes('id="swagger-ui"') },
           exitCode: process.exitCode ?? 0,
         }));
       } finally {
@@ -80,6 +83,7 @@ for (const nodeEnv of ['development', 'production', 'test']) {
       assert.deepEqual(demonstration, []);
     }
     assert.deepEqual(output.health, { status: 'ok' });
+    assert.deepEqual(output.docs, { status: 200, html: true });
     assert.equal(output.exitCode, 0);
     assert.ok(!JSON.stringify(output.events).includes('PRIVATE_ENDPOINT_VALUE'));
     assert.deepEqual(snapshot(), before);

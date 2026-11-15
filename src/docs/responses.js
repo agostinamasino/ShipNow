@@ -1,0 +1,27 @@
+import { ERROR_CATALOG } from '../errors/error.catalog.js';
+
+function errorResponse(codes) {
+  return {
+    description: codes.map(code => `${code}: ${ERROR_CATALOG[code].message}`).join(' '),
+    content: {
+      'application/json': {
+        schema: { $ref: '#/components/schemas/ErrorResponse' },
+        examples: Object.fromEntries(codes.map(code => {
+          const error = { code, message: ERROR_CATALOG[code].message };
+          if (code === 'PRODUCT_VALIDATION_FAILED') error.details = { fields: ['price'] };
+          if (code === 'USER_VALIDATION_FAILED') error.details = { fields: ['email'] };
+          return [code, { value: { success: false, error } }];
+        })),
+      },
+    },
+  };
+}
+
+export default {
+  InvalidJson: errorResponse(['INVALID_JSON']),
+  PayloadTooLarge: errorResponse(['PAYLOAD_TOO_LARGE']),
+  InternalError: errorResponse(['INTERNAL_ERROR']),
+  ProductBadRequest: errorResponse(['PRODUCT_VALIDATION_FAILED', 'PRODUCT_INVALID_STATUS', 'INVALID_JSON']),
+  UserBadRequest: errorResponse(['USER_VALIDATION_FAILED', 'USER_INVALID_ROLE', 'INVALID_JSON']),
+  UserEmailConflict: errorResponse(['USER_EMAIL_ALREADY_EXISTS']),
+};

@@ -1,5 +1,10 @@
 import { readFileSync } from 'node:fs';
 import config from './index.js';
+import schemas from '../docs/schemas.js';
+import responses from '../docs/responses.js';
+import productsPaths from '../docs/paths/products.js';
+import usersPaths from '../docs/paths/users.js';
+import healthPaths from '../docs/paths/health.js';
 
 const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 
@@ -24,10 +29,10 @@ const openapi = {
     { name: 'Health', description: 'Respuesta del servidor.' },
   ],
   components: {
-    schemas: {},
-    responses: {},
+    schemas,
+    responses,
   },
-  paths: {},
+  paths: { ...productsPaths, ...usersPaths, ...healthPaths },
 };
 
 export default openapi;

@@ -545,3 +545,163 @@ y la eliminación de archivos con más de 14 días, usando el transporte real.
 Las carpetas temporales se eliminan al finalizar. Las pruebas HTTP simulan
 MongoDB y el transporte del endpoint de demostración para cubrir los tres
 entornos sin escribir archivos en el repositorio.
+
+## Módulo 5 · Documentación interactiva con Swagger/OpenAPI
+
+OpenAPI describe los contratos HTTP de ShipNow como datos estructurados.
+Swagger UI presenta esa descripción de forma interactiva para consultar schemas,
+parámetros, cuerpos y respuestas, y enviar solicitudes a la API desde el navegador.
+Se utiliza OpenAPI **3.0.3** con `swagger-ui-express`.
+
+La configuración está en `src/config/swagger.js`, que obtiene la versión de
+`package.json` y el puerto de `config.port`. Los schemas y respuestas reutilizables
+se encuentran en `src/docs/schemas.js` y `src/docs/responses.js`. Las operaciones
+están separadas en `src/docs/paths/products.js`, `users.js`, `health.js`, `mocks.js`
+y `logger.js`.
+
+### Iniciar y abrir la documentación
+
+Seguí la sección [Ejecutar](#ejecutar) para configurar las tres variables
+obligatorias. Desde la raíz del proyecto, los siguientes comandos funcionan
+tanto en PowerShell como en Linux/macOS.
+
+```sh
+npm install
+npm start
+```
+
+Para trabajar con reinicio automático se puede usar `npm run dev` en lugar de
+`npm start`. Abrí [http://localhost:3000/api/docs](http://localhost:3000/api/docs).
+La interfaz puede redirigir a `/api/docs/` para servir sus recursos relativos.
+Si `PORT` tiene otro valor, usá ese puerto también en la URL. El selector de
+servidor de Swagger refleja el puerto configurado.
+
+La documentación funciona en `development`, `test` y `production`. Con una
+configuración de entorno válida, la interfaz y sus recursos se sirven aunque
+MongoDB esté desconectado. Products, Users y el seed siguen requiriendo MongoDB
+para las operaciones de persistencia.
+
+Comprobación desde PowerShell, con el servidor en otra terminal.
+
+```powershell
+$base = 'http://localhost:3000'
+curl.exe -i -L "$base/api/docs"
+curl.exe -i "$base/health"
+curl.exe -i "$base/api/mocks/deliveries?qty=1"
+```
+
+Comprobación equivalente desde Linux/macOS.
+
+```sh
+base='http://localhost:3000'
+curl -i -L "$base/api/docs"
+curl -i "$base/health"
+curl -i "$base/api/mocks/deliveries?qty=1"
+```
+
+### Alcance documentado
+
+La especificación contiene **11 operaciones** y **20 schemas reutilizables**.
+
+| Tag | Operaciones o representación |
+| --- | --- |
+| Products | GET y POST `/api/products`. |
+| Users | GET y POST `/api/users`, y vistas previas de usuarios y repartidores con el tag Mocks. |
+| Orders | Schema de pedido y GET `/api/mocks/orders`, junto con Mocks. También participa en los lotes del seed. |
+| Deliveries | Schema de entrega y GET `/api/mocks/deliveries`, junto con Mocks. También participa en los lotes del seed. |
+| Mocks | Cuatro GET de vistas previas y POST `/api/mocks/seed`. |
+| Logger | GET `/api/logger-test`, herramienta de validación disponible solo en desarrollo. |
+| Health | GET `/health`. |
+
+Orders y Deliveries se documentan mediante sus modelos y las operaciones reales
+de mocks y seed. No existen rutas CRUD `/api/orders` o `/api/deliveries`.
+El modelo actual tampoco incluye ítems de pedido, precios por línea, totales o
+relaciones entre Order y Product. Esos conceptos quedan fuera de los schemas.
+La API no tiene autenticación y la especificación no declara respuestas 401/403.
+
+Los schemas distinguen entradas, documentos persistidos y objetos simulados.
+Los documentos pueden incluir `__v` de Mongoose; los objetos mock omiten ese campo.
+`ProductCreate.status` conserva la alternativa String/Boolean temporal mediante
+`oneOf`, mientras que las respuestas de Products usan estados String.
+
+### Consultar y probar desde Swagger UI
+
+1. Expandí un tag y elegí una operación para ver sus parámetros, schemas y ejemplos.
+2. Revisá las respuestas exitosas y las variantes de error antes de usar **Try it out**.
+3. Completá los parámetros o el body aplicables y pulsá **Execute** para enviar la
+   solicitud al servidor seleccionado. Este paso sí ejecuta la operación real.
+4. Consultá el status HTTP y el JSON recibido en **Server response**.
+
+Los cuatro GET de mocks generan lotes en memoria, sin guardar documentos. `qty`
+es opcional, vale 10 por defecto y admite de 0 a 100. Los pedidos y entregas
+incluyen las entidades relacionadas en la misma respuesta, con referencias
+coherentes dentro de ese lote. Cada llamada crea una vista previa independiente.
+
+**POST `/api/mocks/seed` INSERTA documentos reales en la base configurada.** La
+interfaz no lo ejecuta al abrir la página. Usá una base de prueba al elegir
+**Execute** para esa operación y verificá previamente el servidor seleccionado.
+
+El seed admite dos formatos alternativos.
+
+| Formato | Uso y límite |
+| --- | --- |
+| Query `?qty=10` | Crea 10 usuarios, 10 repartidores, 10 pedidos y 10 entregas. Rango de 1 a 25, con un total máximo de 100 documentos. Sin default. |
+| Body JSON con cantidades | Por ejemplo `{"users":2,"couriers":2,"orders":3,"deliveries":3}`. Enteros no negativos, total entre 1 y 100. Campos omitidos equivalen a cero. |
+
+El body rechaza campos desconocidos. Combinar `qty` con cantidades en un body
+no vacío devuelve 400; `qty` junto con `{}` sí está permitido. En Swagger, elegí
+el ejemplo `queryMode` con `{}` al usar `qty`, o quitá `qty` para utilizar el
+ejemplo `explicitCounts`. Si se omiten ambos formatos, el lote se rechaza.
+
+Los pedidos requieren al menos un usuario. Las entregas requieren repartidores
+y un pedido diferente por entrega. El seed asigna las referencias a documentos
+del mismo lote y usa una transacción de MongoDB, por lo que necesita Atlas o un
+replica set compatible. La respuesta 201 incluye `batchId`, `counts` e `ids` tras
+el commit. Las relaciones, la exclusión entre query y body y la suma total se
+describen en OpenAPI y se validan en el service.
+
+`/api/logger-test` permanece visible en Swagger en los tres entornos. En
+`development` responde 200 y emite seis eventos de demostración. En `test` y
+`production` responde 404 `ROUTE_NOT_FOUND`. Su evento fatal permite continuar
+atendiendo solicitudes.
+
+### Errores y verificación de consistencia
+
+Swagger reutiliza el formato centralizado del Módulo 3. El status viaja en la
+respuesta HTTP y el JSON contiene el código y mensaje públicos, por ejemplo
+este HTTP 400 de mocks.
+
+```json
+{
+  "success": false,
+  "error": {
+    "code": "MOCK_INVALID_QTY",
+    "message": "Revisá el rango de qty para esta operación."
+  }
+}
+```
+
+Las validaciones de Products y Users pueden incluir `error.details.fields` con
+nombres de campos permitidos. Los ejemplos se construyen a partir del catálogo
+de 13 códigos. Si varios códigos usan el mismo status, aparecen como ejemplos
+de una única respuesta OpenAPI, sin sobrescribirse.
+
+Ejecutá la regresión con estos comandos, válidos en ambos sistemas.
+
+```sh
+npm test
+npm test -- --test-name-pattern 'OpenAPI|schemas|documentado|Swagger'
+```
+
+Las pruebas comparan métodos de los routers con los paths documentados, verifican
+tags, enums, defaults, campos, referencias `$ref`, ejemplos, variantes de error
+y respuestas HTTP con persistencia simulada. También comprueban HTML, CSS y
+scripts de Swagger UI con MongoDB desconectado y la restricción del logger por
+entorno. Importar o cargar la documentación no ejecuta automáticamente el seed.
+
+La revisión manual coteja los prefijos de montaje en `server.js`, las descripciones
+y las reglas entre campos con controllers, services y repository. Las pruebas de
+schemas verifican las restricciones utilizadas por ShipNow; no reemplazan un
+validador general de toda la especificación OpenAPI. Las pruebas de documentación
+no envían solicitudes de seed y la suite existente usa MongoDB simulado, sin Atlas
+ni archivos nuevos en la carpeta real `logs/`.

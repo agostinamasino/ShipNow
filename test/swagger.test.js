@@ -15,15 +15,19 @@ const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.me
 const logDirectory = fileURLToPath(new URL('../logs/', import.meta.url));
 const logSnapshot = () => existsSync(logDirectory) ? readdirSync(logDirectory) : null;
 
-test('OpenAPI inicial define estructura 3.0.3, versión real, tags y contenedores vacíos', () => {
+test('OpenAPI define estructura 3.0.3, versión real, tags y contenedores documentados', () => {
   assert.equal(openapi.openapi, '3.0.3');
   assert.equal(openapi.info.title, 'ShipNow API');
   assert.equal(openapi.info.version, packageJson.version);
   assert.ok(openapi.info.description.trim());
   assert.deepEqual(openapi.tags.map(tag => tag.name),
     ['Products', 'Users', 'Orders', 'Deliveries', 'Mocks', 'Logger', 'Health']);
-  assert.deepEqual(openapi.paths, {});
-  assert.deepEqual(openapi.components, { schemas: {}, responses: {} });
+  assert.deepEqual(Object.keys(openapi.paths).sort(), [
+    '/api/products', '/api/users', '/health', '/api/mocks/users', '/api/mocks/couriers',
+    '/api/mocks/orders', '/api/mocks/deliveries', '/api/mocks/seed', '/api/logger-test',
+  ].sort());
+  assert.ok(openapi.components.schemas.Product);
+  assert.ok(openapi.components.responses.InternalError);
   assert.deepEqual(openapi.servers, [{
     url: 'http://localhost:3000',
     description: 'Servidor local. El puerto se configura mediante PORT (3000 en .env.example).',

@@ -1,5 +1,5 @@
 {
-  "require": ["./test-support/setup.js"],
+  "require": ["./test-support/setup.js", "./tests/support/isolation.js"],
   "spec": ["tests/**/*.test.js"],
   "timeout": 5000
 }

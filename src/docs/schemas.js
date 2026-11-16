@@ -96,12 +96,12 @@ export default {
           message: { type: 'string', description: 'Mensaje público controlado por el catálogo.' },
           details: {
             type: 'object',
-            description: 'Opcional. Solo las validaciones de Products y Users pueden incluir campos permitidos.',
+            description: 'Opcional, solo para PRODUCT_VALIDATION_FAILED, USER_VALIDATION_FAILED y ORDER_VALIDATION_FAILED. Incluye exclusivamente nombres de campos permitidos para la entidad, nunca valores recibidos.',
             required: ['fields'],
             properties: {
               fields: {
                 type: 'array',
-                items: { type: 'string', enum: ['name', 'description', 'price', 'stock', 'status', 'email', 'role'] },
+                items: { type: 'string', enum: ['name', 'description', 'price', 'stock', 'status', 'email', 'role', 'userId', 'destinationAddress', 'priority'] },
               },
             },
           },
@@ -113,9 +113,20 @@ export default {
     type: 'object', required: ['status'],
     properties: { status: { type: 'string', enum: ['ok'] } },
   },
+  OrderCreate: {
+    type: 'object', required: ['userId', 'destinationAddress'],
+    description: 'userId debe ser un String hexadecimal de 24 caracteres y referenciar un usuario existente con rol USER (user). La dirección debe ser String y conservar contenido después de trim. status y priority se validan exactamente, sin conversiones; null y strings vacíos se rechazan. Sus defaults se aplican solo al omitirlos. Las propiedades adicionales son ignoradas.',
+    properties: {
+      ...orderProperties,
+      destinationAddress: {
+        ...orderProperties.destinationAddress,
+        pattern: '\\S',
+      },
+    },
+  },
   Order: {
     type: 'object', required: ['_id', ...Object.keys(orderProperties)],
-    description: 'Pedido persistido con userId que referencia a User. Se crea mediante el seed, sin CRUD HTTP propio.',
+    description: 'Pedido persistido, creado mediante POST /api/orders o seed. userId se devuelve como ID, sin datos personales del usuario. Puede incluir __v de Mongoose.',
     properties: { ...persistedProperties, ...orderProperties },
   },
   Delivery: {

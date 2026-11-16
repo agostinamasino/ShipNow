@@ -1,7 +1,7 @@
 # ShipNow
 
 API académica de Backend 3 con Node.js, Express y MongoDB/Mongoose.
-Products, Users y mocks siguen la arquitectura por capas.
+Products, Users, Orders y mocks siguen la arquitectura por capas.
 
 | Capa | Responsabilidad |
 | --- | --- |
@@ -33,6 +33,17 @@ email en MongoDB (se inicializa en el primer POST y se reutiliza). Esto requiere
 permiso para crear índices y también protege ante solicitudes simultáneas.
 Si existen duplicados previos o un índice incompatible, no se modifica ni elimina
 ningún documento: el POST devuelve 500 y se debe revisar el índice/datos existentes.
+
+Orders mantiene la misma separación en `orders.routes.js`, `order.controller.js`,
+`order.service.js` y `order.repository.js`. El service valida los datos y exige un
+usuario existente con rol USER; el repository consulta únicamente `_id` y `role`
+del usuario. Los errores se propagan al middleware global.
+
+`src/app.js` configura y exporta Express con sus routers, Swagger y middlewares,
+sin abrir puertos ni conectar MongoDB. `src/server.js` importa esa aplicación,
+inicia el servidor HTTP, intenta la conexión y registra los eventos de arranque.
+Importar la aplicación para pruebas requiere la configuración de entorno válida;
+la preparación de testing la establece antes de importar los módulos.
 
 ## Ejecutar
 
@@ -75,7 +86,7 @@ el nombre de base `shipnow`, y reemplazar las credenciales. Codificar los caract
 especiales de la contraseña para una URL. No compartir `.env`: Git lo ignora.
 
 El servidor escucha mientras intenta conectarse a MongoDB. Si la conexión inicial
-falla, los GET de mocks y `/health` siguen disponibles. Products y Users requieren
+falla, los GET de mocks, Swagger y `/health` siguen disponibles. Products, Users y Orders requieren
 MongoDB para leer o guardar documentos.
 
 ## Probar con Postman o Thunder Client
@@ -90,6 +101,9 @@ Para POST, elegir Body → raw → JSON y `Content-Type: application/json`.
 | POST | `/api/products` | 201, producto guardado |
 | GET | `/api/users` | 200, array de usuarios |
 | POST | `/api/users` | 201, usuario guardado |
+| GET | `/api/orders` | 200, array de pedidos, posiblemente vacío |
+| POST | `/api/orders` | 201, pedido guardado |
+| GET | `/api/orders/:id` | 200, pedido encontrado |
 
 Producto de ejemplo:
 
@@ -126,6 +140,77 @@ devuelve 409.
 
 Enviar un producto sin `name` o con precio negativo, o un usuario sin `email`,
 devuelve 400. Un fallo de base de datos devuelve 500 con un mensaje genérico.
+
+## Pedidos (Orders)
+
+`POST /api/orders` requiere un body objeto con `userId` y `destinationAddress`.
+`userId` debe ser String hexadecimal de 24 caracteres y referenciar un usuario
+existente con `USER_ROLES.USER` (`user`). ADMIN y COURIER no pueden ser el usuario
+referenciado por este endpoint. La dirección debe ser String y conservar contenido
+después de `trim`. Los campos adicionales se ignoran.
+
+`status` es opcional y admite `pending`, `in_progress` o `delivered`;
+`priority` admite `low`, `normal` o `high`. Sus defaults son `pending` y `normal`
+solo cuando se omiten; `null`, strings vacíos y valores ajenos a las constantes
+se rechazan. El endpoint permite cualquiera de los valores válidos al crear.
+
+Body mínimo (el ID es ilustrativo; reemplazalo por un usuario USER existente):
+
+```json
+{
+  "userId": "507f1f77bcf86cd799439012",
+  "destinationAddress": "Calle de prueba 123"
+}
+```
+
+Respuesta HTTP 201 ilustrativa:
+
+```json
+{
+  "_id": "507f1f77bcf86cd799439031",
+  "userId": "507f1f77bcf86cd799439012",
+  "destinationAddress": "Calle de prueba 123",
+  "status": "pending",
+  "priority": "normal",
+  "__v": 0
+}
+```
+
+`GET /api/orders` devuelve un array sin orden garantizado; si no hay registros,
+devuelve `[]`. `GET /api/orders/:id` devuelve un documento. Las referencias se
+representan como IDs, sin expandir los datos personales del usuario.
+
+Los datos inválidos devuelven 400; un usuario referenciado inexistente o un pedido
+inexistente devuelven 404 con códigos diferentes. Un ID mal formado en la ruta
+devuelve 400 antes de consultar la base. Los fallos inesperados devuelven 500.
+El parser también aplica `INVALID_JSON` (incluido JSON `null`) y el límite de 100 KB.
+
+No existe PATCH de estados ni CRUD independiente de Deliveries. La consigna pide
+actualizar estados «si aplica»: el alcance actual no define transiciones ni reglas
+de sincronización entre un pedido y sus entregas. Se prueba la validación de enums
+al crear, sin introducir una operación de actualización ni transiciones inventadas.
+Crear un pedido tampoco crea o modifica entregas.
+
+Para probar manualmente en una base de prueba con MongoDB conectado, los siguientes
+comandos insertan un pedido. Usá el ID de un usuario USER existente.
+
+```powershell
+$base = 'http://localhost:3000'
+$userId = '507f1f77bcf86cd799439012' # Reemplazar por un ID existente
+$pedido = Invoke-RestMethod -Method Post -Uri "$base/api/orders" -ContentType 'application/json' -Body (@{ userId = $userId; destinationAddress = 'Calle de prueba 123' } | ConvertTo-Json)
+Invoke-RestMethod -Uri "$base/api/orders"
+Invoke-RestMethod -Uri "$base/api/orders/$($pedido._id)"
+```
+
+```sh
+base='http://localhost:3000'
+userId='507f1f77bcf86cd799439012' # Reemplazar por un ID existente
+curl -i "$base/api/orders" -H 'Content-Type: application/json' --data "{\"userId\":\"$userId\",\"destinationAddress\":\"Calle de prueba 123\"}"
+curl -i "$base/api/orders"
+# Reemplazar por el _id devuelto en el POST
+orderId='507f1f77bcf86cd799439031'
+curl -i "$base/api/orders/$orderId"
+```
 
 ## Constantes y compatibilidad de estados
 
@@ -325,6 +410,13 @@ incluyen `error.details.fields` con nombres de campos permitidos.
 | `USER_VALIDATION_FAILED` | 400 | El cuerpo o los campos del usuario son inválidos. |
 | `USER_INVALID_ROLE` | 400 | El rol enviado al crear un usuario es inválido. |
 | `USER_EMAIL_ALREADY_EXISTS` | 409 | El correo ya existe o se produce una colisión con el índice de email al guardar. |
+| `ORDER_VALIDATION_FAILED` | 400 | Body inválido, userId mal formado o dirección inválida. Puede incluir campos seguros. |
+| `ORDER_INVALID_ID` | 400 | El ID del pedido en la ruta no es hexadecimal de 24 caracteres. |
+| `ORDER_INVALID_STATUS` | 400 | Estado inválido al crear un pedido. |
+| `ORDER_INVALID_PRIORITY` | 400 | Prioridad inválida al crear un pedido. |
+| `ORDER_INVALID_USER_ROLE` | 400 | El usuario referenciado no tiene rol USER. |
+| `ORDER_USER_NOT_FOUND` | 404 | El usuario referenciado no existe. |
+| `ORDER_NOT_FOUND` | 404 | El ID tiene formato válido pero el pedido no existe. |
 | `MOCK_INVALID_QTY` | 400 | `qty` es inválido, está repetido o queda fuera del rango del endpoint. |
 | `MOCK_INVALID_SEED_REQUEST` | 400 | El body o las cantidades del seed son inválidos, o se combinan cantidades del body con `qty`. |
 | `MOCK_INVALID_SEED_RELATIONS` | 400 | Faltan usuarios para los pedidos o faltan pedidos distintos o repartidores para las entregas. |
@@ -362,7 +454,7 @@ curl.exe -i "$base/api/mocks/users?qty=-1"
 '{"orders":1}' | curl.exe -i "$base/api/mocks/seed" -H 'Content-Type: application/json' --data-binary '@-'
 curl.exe -i -X POST "$base/api/mocks/seed?qty=1" # Ejecutar con MongoDB desconectado
 curl.exe -i "$base/api/no-existe"
-npm test -- --test-name-pattern 'Products propaga errores de escritura'
+node --import ./test-support/setup.js --test --test-name-pattern 'Products propaga errores de escritura' test/*.test.js
 ```
 
 **Linux/macOS**
@@ -376,7 +468,7 @@ curl -i "$base/api/mocks/users?qty=-1"
 curl -i "$base/api/mocks/seed" -H 'Content-Type: application/json' --data '{"orders":1}'
 curl -i -X POST "$base/api/mocks/seed?qty=1" # Ejecutar con MongoDB desconectado
 curl -i "$base/api/no-existe"
-npm test -- --test-name-pattern 'Products propaga errores de escritura'
+node --import ./test-support/setup.js --test --test-name-pattern 'Products propaga errores de escritura' test/*.test.js
 ```
 
 ## Logging y monitoreo básico
@@ -448,7 +540,9 @@ evitar recursión.
 | Seed | `MOCK_SEED_STARTED users=... couriers=... orders=... deliveries=...` en `info`, tras validar las cantidades. |
 | Seed confirmado | `MOCK_SEED_COMPLETED users=... couriers=... orders=... deliveries=...` en `info`, después del commit. |
 
-Los services registran éxitos. El middleware global registra la clasificación de
+Los services de Products, Users y mocks registran los éxitos descritos en la tabla.
+Orders utiliza el resumen HTTP y el middleware global, sin eventos de negocio propios.
+El middleware global registra la clasificación de
 los errores y mantiene el formato HTTP del Módulo 3, con `success: false` y
 `error.code`/`error.message`. Una operación fallida no anuncia éxito.
 El evento del seed confirmado se emite fuera del callback transaccional para
@@ -536,7 +630,8 @@ npm test
 
 `npm test` carga `test-support/setup.js` antes de importar la aplicación y fija
 un entorno de prueba aislado. Usá ese script también al seleccionar pruebas con
-`npm test -- --test-name-pattern 'logger'`. La suite comprueba la ausencia de
+`node --import ./test-support/setup.js --test --test-name-pattern 'logger' test/*.test.js`.
+Para Mocha se usa `npm run test:functional -- --grep 'Logger'`. La suite comprueba la ausencia de
 archivos nuevos en la carpeta real `logs/` y cierra los transportes de pruebas.
 
 Las pruebas de persistencia escriben JSON real en carpetas temporales. Las de
@@ -556,7 +651,7 @@ Se utiliza OpenAPI **3.0.3** con `swagger-ui-express`.
 La configuración está en `src/config/swagger.js`, que obtiene la versión de
 `package.json` y el puerto de `config.port`. Los schemas y respuestas reutilizables
 se encuentran en `src/docs/schemas.js` y `src/docs/responses.js`. Las operaciones
-están separadas en `src/docs/paths/products.js`, `users.js`, `health.js`, `mocks.js`
+están separadas en `src/docs/paths/products.js`, `users.js`, `orders.js`, `health.js`, `mocks.js`
 y `logger.js`.
 
 ### Iniciar y abrir la documentación
@@ -578,7 +673,7 @@ servidor de Swagger refleja el puerto configurado.
 
 La documentación funciona en `development`, `test` y `production`. Con una
 configuración de entorno válida, la interfaz y sus recursos se sirven aunque
-MongoDB esté desconectado. Products, Users y el seed siguen requiriendo MongoDB
+MongoDB esté desconectado. Products, Users, Orders y el seed siguen requiriendo MongoDB
 para las operaciones de persistencia.
 
 Comprobación desde PowerShell, con el servidor en otra terminal.
@@ -601,20 +696,20 @@ curl -i "$base/api/mocks/deliveries?qty=1"
 
 ### Alcance documentado
 
-La especificación contiene **11 operaciones** y **20 schemas reutilizables**.
+La especificación contiene **14 operaciones** y **21 schemas reutilizables**.
 
 | Tag | Operaciones o representación |
 | --- | --- |
 | Products | GET y POST `/api/products`. |
 | Users | GET y POST `/api/users`, y vistas previas de usuarios y repartidores con el tag Mocks. |
-| Orders | Schema de pedido y GET `/api/mocks/orders`, junto con Mocks. También participa en los lotes del seed. |
+| Orders | GET y POST `/api/orders`, GET `/api/orders/{id}` y GET `/api/mocks/orders`, junto con Mocks. También participa en el seed. |
 | Deliveries | Schema de entrega y GET `/api/mocks/deliveries`, junto con Mocks. También participa en los lotes del seed. |
 | Mocks | Cuatro GET de vistas previas y POST `/api/mocks/seed`. |
 | Logger | GET `/api/logger-test`, herramienta de validación disponible solo en desarrollo. |
 | Health | GET `/health`. |
 
-Orders y Deliveries se documentan mediante sus modelos y las operaciones reales
-de mocks y seed. No existen rutas CRUD `/api/orders` o `/api/deliveries`.
+Orders incluye creación y consultas propias; OpenAPI representa `:id` como `{id}`.
+Deliveries se documenta mediante su modelo, mocks y seed, sin rutas CRUD propias.
 El modelo actual tampoco incluye ítems de pedido, precios por línea, totales o
 relaciones entre Order y Product. Esos conceptos quedan fuera de los schemas.
 La API no tiene autenticación y la especificación no declara respuestas 401/403.
@@ -681,16 +776,16 @@ este HTTP 400 de mocks.
 }
 ```
 
-Las validaciones de Products y Users pueden incluir `error.details.fields` con
+Las validaciones de Products, Users y Orders pueden incluir `error.details.fields` con
 nombres de campos permitidos. Los ejemplos se construyen a partir del catálogo
-de 13 códigos. Si varios códigos usan el mismo status, aparecen como ejemplos
+de 20 códigos. Si varios códigos usan el mismo status, aparecen como ejemplos
 de una única respuesta OpenAPI, sin sobrescribirse.
 
 Ejecutá la regresión con estos comandos, válidos en ambos sistemas.
 
 ```sh
 npm test
-npm test -- --test-name-pattern 'OpenAPI|schemas|documentado|Swagger'
+node --import ./test-support/setup.js --test --test-name-pattern 'OpenAPI|schemas|documentado|Swagger|Orders' test/*.test.js
 ```
 
 Las pruebas comparan métodos de los routers con los paths documentados, verifican
@@ -699,9 +794,122 @@ y respuestas HTTP con persistencia simulada. También comprueban HTML, CSS y
 scripts de Swagger UI con MongoDB desconectado y la restricción del logger por
 entorno. Importar o cargar la documentación no ejecuta automáticamente el seed.
 
-La revisión manual coteja los prefijos de montaje en `server.js`, las descripciones
+La revisión manual coteja los prefijos de montaje en `app.js`, las descripciones
 y las reglas entre campos con controllers, services y repository. Las pruebas de
 schemas verifican las restricciones utilizadas por ShipNow; no reemplazan un
 validador general de toda la especificación OpenAPI. Las pruebas de documentación
 no envían solicitudes de seed y la suite existente usa MongoDB simulado, sin Atlas
 ni archivos nuevos en la carpeta real `logs/`.
+
+## Módulo 6 · Testing funcional
+
+La suite nueva usa **Mocha**, **Chai** y **Supertest**, instalados como
+`devDependencies`. Mocha ejecuta y organiza las pruebas, Chai verifica resultados
+y Supertest envía solicitudes HTTP a la aplicación exportada por `src/app.js`.
+No hay que ejecutar `npm start` ni disponer de MongoDB para correr las suites.
+Instalá también las dependencias de desarrollo: desde un checkout con lockfile,
+`npm ci` prepara el entorno en PowerShell y Linux/macOS. No usar `--omit=dev`
+para ejecutar estas pruebas.
+
+### Suites, estructura y comandos
+
+| Ubicación | Ejecutor y alcance |
+| --- | --- |
+| `test/` | 140 pruebas de regresión con `node:test` y `node:assert/strict`: configuración, modelos, dominio, logging, errores, HTTP y contratos OpenAPI. |
+| `tests/` | 134 pruebas funcionales con Mocha, Chai y Supertest: `health/`, `products/`, `users/`, `orders/`, `mocks/`, `logger/`, `swagger/` y `errors/`. |
+| `tests/support/` | Helpers de expectativas, reemplazos, invariantes del dominio y barreras de aislamiento. |
+| `test-support/setup.js` | Preparación del entorno antes de importar la aplicación en ambas suites. |
+| `.mocharc.json` | Carga la preparación y los hooks globales; descubre únicamente `tests/**/*.test.js`. |
+
+La separación es de ejecutores y organización: la regresión también contiene
+pruebas HTTP, mientras que la suite nueva utiliza Supertest de forma sistemática.
+No representa una medición porcentual de cobertura de líneas o ramas.
+
+Estos comandos funcionan desde la raíz en ambos sistemas operativos:
+
+```sh
+npm run test:regression
+npm run test:functional
+npm test
+npm test
+```
+
+`npm test` ejecuta primero la regresión y, si pasa, la suite funcional, en procesos
+separados. Node descubre exclusivamente `test/*.test.js` y Mocha exclusivamente
+`tests/**/*.test.js`: no ejecutan los mismos archivos dos veces. Las dos llamadas
+completas deben terminar sin limpieza manual. El resultado de referencia del
+Módulo 6 es **274 pruebas aprobadas: 140 de regresión y 134 funcionales**.
+
+Para seleccionar casos de Mocha, por ejemplo Orders:
+
+```sh
+npm run test:functional -- --grep 'Orders por HTTP'
+```
+
+### Cobertura funcional y contratos
+
+| Recurso | Pruebas | Casos principales |
+| --- | ---: | --- |
+| Health | 1 | HTTP 200, JSON y body exacto. |
+| Products | 11 | GET/POST, defaults, campos, precio/stock/estado inválidos y fallos de lectura. |
+| Users | 10 | GET/POST, normalización, validaciones, duplicados previos y al guardar, fallos internos. |
+| Orders | 38 | Listado con datos y vacío, creación mínima/completa, defaults, referencias, rol USER, ID inválido, 404 y errores de persistencia. |
+| GET de mocks | 40 | Las cuatro rutas, qty predeterminado/válido/0/100, cantidades inválidas, roles, enums y relaciones. |
+| Seed | 22 | HTTP 201 con qty o body, relaciones, IDs devueltos, validaciones, 503 y rollback simulado. |
+| Logger | 3 | Ruta disponible en development y ausente en test/production. |
+| Swagger UI | 5 | HTML y recursos servidos sin MongoDB. |
+| Errores globales | 4 | 400 JSON inválido, 404, 413 y 500 sin datos internos. |
+
+Las respuestas de error se comparan con el catálogo real, incluyendo
+`details.fields` solo cuando corresponde. Para Orders se comprueba que un ID
+inválido no consulte persistencia y que entradas rechazadas no inserten documentos.
+JSON `null` es rechazado por el parser estricto de Express con `INVALID_JSON` antes
+de llegar al service. Las comprobaciones documentales de regresión verifican las
+14 operaciones, schemas, enums, defaults, referencias `$ref`, ejemplos y respuestas
+HTTP con persistencia simulada.
+
+No se prueba actualización de estados: no existe PATCH y el dominio no define
+transiciones ni sincronización con Delivery. Tampoco se afirma cobertura de CRUD
+de Deliveries, autenticación, ítems o totales de pedidos.
+
+### Entorno, persistencia simulada y limpieza
+
+`test-support/setup.js` fija `NODE_ENV=test`, `PORT=3000` y una URI local ficticia
+para una base llamada `shipnow_test_unused` antes de importar módulos dependientes
+del entorno. Esa URI **no se utiliza para conectar ni requiere una base existente**.
+No se usa la conexión principal ni se modifica `.env`. La configuración productiva
+sigue centralizada en `src/config/index.js`; dotenv respeta los valores preparados
+para el proceso de prueba. El logger predeterminado permanece silencioso en test.
+
+Las pruebas atraviesan Express, routers, controllers, services y repositories.
+Se reemplazan las operaciones necesarias de los modelos Mongoose, conservando
+las validaciones reales del esquema cuando corresponde. No se depende de registros
+persistidos. Las fixtures controladas se crean por prueba; los mocks aleatorios
+se verifican mediante invariantes, tipos y relaciones, sin exigir IDs o correos
+aleatorios exactos.
+
+Los hooks `beforeEach` instalan reemplazos y preparan estado nuevo; `afterEach`
+los restaura. La barrera global de `tests/support/isolation.js` impide conexiones
+por `mongoose.connect`/`openUri`, transacciones sin simular y operaciones de escritura
+de las colecciones. Al finalizar exige cero intentos prohibidos, conexión cerrada
+y ningún archivo nuevo en `logs/`. La URI ficticia por sí sola no es la barrera.
+Los reemplazos se restauran también cuando una aserción falla.
+
+Supertest administra servidores temporales; no se importa `server.js` para iniciar
+el servidor productivo en la suite funcional. El logger se prueba por entorno en
+procesos separados, con transportes simulados y recursos liberados. La regresión
+prueba archivos de logging reales únicamente en carpetas temporales que elimina
+al finalizar. La suite de Users no depende del número de inicializaciones del
+índice de email, cuya promesa se cachea; los escenarios anteriores de regresión
+mantienen el aislamiento de procesos de Node.
+
+El seed se prueba por HTTP, pero sus inserciones, sesión y transacción se simulan
+en memoria. Se verifica la coordinación y el rollback del doble, **no la persistencia
+real ni la atomicidad de una transacción MongoDB real**. Las suites no ejecutan un
+seed real ni necesitan Atlas. Una prueba de integración con MongoDB requeriría
+otra etapa y una base aislada con soporte transaccional, nunca la base principal.
+
+`.gitignore` mantiene excluidos `.env`, `node_modules/` y `logs/`. Antes de entregar,
+revisá los cambios con `git status --short`, ejecutá ambas suites y repetí `npm test`.
+El repositorio debe incluir los archivos nuevos de Orders, pruebas y OpenAPI al
+registrar manualmente los cambios; los comandos de testing no hacen commits ni pushes.

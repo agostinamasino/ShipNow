@@ -16,6 +16,9 @@ import Order from '../src/models/Order.js';
 import Delivery from '../src/models/Delivery.js';
 import mocksRouter from '../src/routes/mocks.routes.js';
 import loggerRouter from '../src/routes/logger.routes.js';
+import ordersRouter from '../src/routes/orders.routes.js';
+import request from 'supertest';
+import { ORDER_PRIORITY } from '../src/constants/index.js';
 
 function resolveRef(reference) {
   assert.ok(reference.startsWith('#/'));
@@ -67,12 +70,14 @@ function visit(value, inspect) {
   for (const child of Object.values(value)) visit(child, inspect);
 }
 
-test('se documentan exactamente las once operaciones existentes con métodos y tags correctos', () => {
+test('se documentan exactamente las catorce operaciones existentes con métodos y tags correctos', () => {
   const operations = Object.entries(document.paths).flatMap(([path, methods]) =>
     Object.entries(methods).map(([method, operation]) => [method, path, operation.tags]));
   assert.deepEqual(operations, [
     ['get', '/api/products', ['Products']], ['post', '/api/products', ['Products']],
     ['get', '/api/users', ['Users']], ['post', '/api/users', ['Users']],
+    ['get', '/api/orders', ['Orders']], ['post', '/api/orders', ['Orders']],
+    ['get', '/api/orders/{id}', ['Orders']],
     ['get', '/health', ['Health']],
     ['get', '/api/mocks/users', ['Users', 'Mocks']],
     ['get', '/api/mocks/couriers', ['Users', 'Mocks']],
@@ -94,10 +99,19 @@ test('se documentan exactamente las once operaciones existentes con métodos y t
       assert.deepEqual(Object.keys(document.paths[path]), Object.keys(layer.route.methods));
     }
   }
-  assert.equal(new Set(operations.map(([method, path]) => document.paths[path][method].operationId)).size, 11);
-  for (const methods of Object.values(document.paths)) {
+  assert.equal(new Set(operations.map(([method, path]) => document.paths[path][method].operationId)).size, 14);
+  for (const [path, methods] of Object.entries(document.paths)) {
     for (const operation of Object.values(methods)) {
-      assert.ok((operation.parameters ?? []).every(parameter => parameter.in === 'query' && parameter.name === 'qty'));
+      for (const parameter of operation.parameters ?? []) {
+        if (path === '/api/orders/{id}') {
+          assert.equal(parameter.in, 'path');
+          assert.equal(parameter.name, 'id');
+          assert.equal(parameter.required, true);
+        } else {
+          assert.equal(parameter.in, 'query');
+          assert.equal(parameter.name, 'qty');
+        }
+      }
       assert.equal(operation.security, undefined);
       assert.equal(operation.responses[401], undefined);
       assert.equal(operation.responses[403], undefined);
@@ -105,10 +119,10 @@ test('se documentan exactamente las once operaciones existentes con métodos y t
   }
 });
 
-test('los veinte schemas existen y todos los $ref del documento se resuelven', () => {
+test('los veintiún schemas existen y todos los $ref del documento se resuelven', () => {
   assert.deepEqual(Object.keys(document.components.schemas).sort(),
     ['ObjectId', 'ProductCreate', 'Product', 'UserCreate', 'User', 'ErrorResponse', 'HealthResponse',
-      'Order', 'Delivery', 'MockUser', 'MockCourier', 'MockOrder', 'MockDelivery',
+      'Order', 'OrderCreate', 'Delivery', 'MockUser', 'MockCourier', 'MockOrder', 'MockDelivery',
       'MockUsersResponse', 'MockCouriersResponse', 'MockOrdersResponse', 'MockDeliveriesResponse',
       'SeedCounts', 'SeedRequest', 'SeedResponse'].sort());
   visit(document, value => { if (value.$ref) resolveRef(value.$ref); });
@@ -236,7 +250,8 @@ test('los objetos mock tienen exactamente los campos reales sin __v y roles espe
   }
   assert.deepEqual(schemas.MockUser.properties.role.enum, [USER_ROLES.USER]);
   assert.deepEqual(schemas.MockCourier.properties.role.enum, [USER_ROLES.COURIER]);
-  assert.equal(document.paths['/api/orders'], undefined);
+  assert.ok(document.paths['/api/orders'].get);
+  assert.ok(document.paths['/api/orders'].post);
   assert.equal(document.paths['/api/deliveries'], undefined);
 });
 
@@ -362,4 +377,138 @@ test('importar Swagger mantiene logger visible en todos los entornos sin ejecuta
     }
     assert.equal(operation.security, undefined);
   }
+});
+
+test('Orders documenta exactamente los métodos del router sin PATCH ni CRUD de Deliveries', () => {
+  const actual = ordersRouter.stack.filter(layer => layer.route).flatMap(({ route }) =>
+    Object.keys(route.methods).map(method => [
+      '/api/orders' + (route.path === '/' ? '' : route.path.replace(':id', '{id}')), method,
+    ]));
+  const documented = Object.entries(document.paths).filter(([path]) => path.startsWith('/api/orders'))
+    .flatMap(([path, methods]) => Object.keys(methods).map(method => [path, method]));
+  assert.deepEqual(documented, actual);
+  assert.equal(document.paths['/api/orders/{id}'].patch, undefined);
+  assert.equal(document.paths['/api/orders/{id}/status'], undefined);
+  assert.equal(document.paths['/api/deliveries'], undefined);
+  assert.equal(document.paths['/api/deliveries/{id}'], undefined);
+});
+
+test('OrderCreate describe los campos aceptados, enums, defaults y validación de dirección', () => {
+  const schema = document.components.schemas.OrderCreate;
+  assert.deepEqual(schema.required, ['userId', 'destinationAddress']);
+  assert.deepEqual(Object.keys(schema.properties).sort(), ['userId', 'destinationAddress', 'status', 'priority'].sort());
+  assert.notEqual(schema.additionalProperties, false); // El service ignora campos adicionales.
+  assert.equal(schema.properties.userId.$ref, '#/components/schemas/ObjectId');
+  assert.deepEqual(schema.properties.status.enum, Object.values(ORDER_STATUS));
+  assert.deepEqual(schema.properties.priority.enum, Object.values(ORDER_PRIORITY));
+  assert.equal(schema.properties.status.default, ORDER_STATUS.PENDING);
+  assert.equal(schema.properties.priority.default, ORDER_PRIORITY.NORMAL);
+  const minimal = document.paths['/api/orders'].post.requestBody.content['application/json'].examples.minimal.value;
+  assertMatches(schema, minimal);
+  assertMatches(schema, { ...minimal, ignored: true });
+  for (const field of ['status', 'priority']) {
+    for (const value of [null, '', 'unknown']) assert.throws(() => assertMatches(schema, { ...minimal, [field]: value }));
+  }
+  for (const value of ['', '   ', 123, null]) {
+    assert.throws(() => assertMatches(schema, { ...minimal, destinationAddress: value }));
+  }
+  assert.throws(() => assertMatches(schema, { ...minimal, userId: 'invalid' }));
+  assert.throws(() => assertMatches(schema, { destinationAddress: minimal.destinationAddress }));
+  assert.throws(() => assertMatches(schema, { userId: minimal.userId }));
+  assert.ok(schema.description.includes('USER'));
+});
+
+test('Orders declara body, parámetro requerido y respuestas reutilizables exactas', () => {
+  const collection = document.paths['/api/orders'];
+  const detail = document.paths['/api/orders/{id}'].get;
+  assert.equal(collection.post.requestBody.required, true);
+  assert.equal(collection.post.requestBody.content['application/json'].schema.$ref, '#/components/schemas/OrderCreate');
+  assert.equal(collection.get.requestBody, undefined);
+  assert.equal(detail.requestBody, undefined);
+  assert.deepEqual(detail.parameters, [{
+    name: 'id', in: 'path', required: true,
+    description: 'ObjectId hexadecimal de 24 caracteres, sin espacios.',
+    schema: { $ref: '#/components/schemas/ObjectId' }, example: '507f1f77bcf86cd799439031',
+  }]);
+  for (const [operation, statuses] of [[collection.get, ['200', '400', '413', '500']],
+    [collection.post, ['201', '400', '404', '413', '500']], [detail, ['200', '400', '404', '413', '500']]]) {
+    assert.deepEqual(Object.keys(operation.responses), statuses);
+    assert.equal(operation.responses[413].$ref, '#/components/responses/PayloadTooLarge');
+    assert.equal(operation.responses[500].$ref, '#/components/responses/InternalError');
+    assert.ok(operation.description.includes('INVALID_JSON'));
+  }
+  assert.deepEqual(collection.get.responses[200].content['application/json'].schema,
+    { type: 'array', items: { $ref: '#/components/schemas/Order' } });
+  assert.equal(collection.post.responses[201].content['application/json'].schema.$ref, '#/components/schemas/Order');
+  assert.equal(detail.responses[200].content['application/json'].schema.$ref, '#/components/schemas/Order');
+});
+
+test('los errores de Orders cubren sus siete códigos y solo validación incluye detalles', () => {
+  const collection = document.paths['/api/orders'];
+  const detail = document.paths['/api/orders/{id}'].get;
+  for (const [operation, status, codes] of [
+    [collection.post, 400, ['ORDER_VALIDATION_FAILED', 'ORDER_INVALID_STATUS', 'ORDER_INVALID_PRIORITY', 'ORDER_INVALID_USER_ROLE', 'INVALID_JSON']],
+    [collection.post, 404, ['ORDER_USER_NOT_FOUND']],
+    [detail, 400, ['ORDER_INVALID_ID', 'INVALID_JSON']],
+    [detail, 404, ['ORDER_NOT_FOUND']],
+  ]) {
+    const media = dereference(operation.responses[status]).content['application/json'];
+    assert.deepEqual(Object.keys(media.examples), codes);
+    for (const [code, { value }] of Object.entries(media.examples)) {
+      assert.equal(ERROR_CATALOG[code].status, status);
+      assert.equal(value.error.message, ERROR_CATALOG[code].message);
+      if (code === 'ORDER_VALIDATION_FAILED') assert.deepEqual(value.error.details, { fields: ['userId'] });
+      else assert.equal(value.error.details, undefined);
+      assertMatches(media.schema, value);
+    }
+  }
+  const fields = document.components.schemas.ErrorResponse.properties.error.properties.details.properties.fields.items.enum;
+  for (const field of ['userId', 'destinationAddress', 'status', 'priority']) assert.ok(fields.includes(field));
+});
+
+test('ejemplos OpenAPI de Orders coinciden con respuestas HTTP y validación real sin MongoDB', async t => {
+  const app = express();
+  app.use(express.json());
+  app.use('/api/orders', ordersRouter);
+  app.use(errorMiddleware);
+  const collection = document.paths['/api/orders'];
+  const detail = document.paths['/api/orders/{id}'].get;
+  const example = collection.post.responses[201].content['application/json'].example;
+  let order;
+  t.mock.method(User, 'findById', () => ({ select: async () => ({ _id: example.userId, role: USER_ROLES.USER }) }));
+  t.mock.method(Order, 'create', async data => {
+    order = new Order({ ...data, _id: example._id, __v: 0 });
+    await order.validate();
+    return order;
+  });
+  t.mock.method(Order, 'find', async () => order ? [order] : []);
+  t.mock.method(Order, 'findById', async () => order ?? null);
+  const media = collection.post.requestBody.content['application/json'];
+  for (const { value } of Object.values(media.examples)) {
+    assertMatches(media.schema, value);
+    const response = await request(app).post('/api/orders').send(value).expect(201);
+    assertMatches(collection.post.responses[201].content['application/json'].schema, response.body);
+  }
+  const created = await request(app).post('/api/orders').send(media.examples.minimal.value).expect(201);
+  assert.deepEqual(created.body, example);
+  assert.deepEqual((await request(app).get('/api/orders/' + example._id).expect(200)).body,
+    detail.responses[200].content['application/json'].example);
+  const listed = await request(app).get('/api/orders').expect(200);
+  assertMatches(collection.get.responses[200].content['application/json'].schema, listed.body);
+  assert.deepEqual(listed.body, collection.get.responses[200].content['application/json'].examples.populated.value);
+  order = undefined;
+  assert.deepEqual((await request(app).get('/api/orders').expect(200)).body,
+    collection.get.responses[200].content['application/json'].examples.empty.value);
+  for (const [path, code] of [['invalid', 'ORDER_INVALID_ID'], [example._id, 'ORDER_NOT_FOUND']]) {
+    const response = await request(app).get('/api/orders/' + path);
+    assert.deepEqual(response.body, dereference(detail.responses[response.status]).content['application/json'].examples[code].value);
+  }
+  for (const [field, code] of [['status', 'ORDER_INVALID_STATUS'], ['priority', 'ORDER_INVALID_PRIORITY']]) {
+    const response = await request(app).post('/api/orders').send({ ...media.examples.minimal.value, [field]: 'invalid' }).expect(400);
+    assert.deepEqual(response.body, dereference(collection.post.responses[400]).content['application/json'].examples[code].value);
+  }
+  t.mock.method(User, 'findById', () => ({ select: async () => null }));
+  const missing = await request(app).post('/api/orders').send(media.examples.minimal.value).expect(404);
+  assert.deepEqual(missing.body, dereference(collection.post.responses[404]).content['application/json'].examples.ORDER_USER_NOT_FOUND.value);
+  assert.equal(mongoose.connection.readyState, 0);
 });

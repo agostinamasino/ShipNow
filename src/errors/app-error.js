@@ -3,6 +3,7 @@ import { ERROR_CATALOG } from './error.catalog.js';
 const validationFields = {
   PRODUCT_VALIDATION_FAILED: ['name', 'description', 'price', 'stock', 'status'],
   USER_VALIDATION_FAILED: ['name', 'email', 'role'],
+  ORDER_VALIDATION_FAILED: ['userId', 'destinationAddress', 'status', 'priority'],
 };
 
 export class AppError extends Error {

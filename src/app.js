@@ -2,6 +2,7 @@ import config from './config/index.js';
 import express from 'express';
 import productsRouter from './routes/products.routes.js';
 import usersRouter from './routes/users.routes.js';
+import ordersRouter from './routes/orders.routes.js';
 import mocksRouter from './routes/mocks.routes.js';
 import loggerRouter from './routes/logger.routes.js';
 import { notFound } from './middlewares/not-found.middleware.js';
@@ -16,6 +17,7 @@ app.use(httpLogger);
 app.use(express.json());
 app.use('/api/products', productsRouter);
 app.use('/api/users', usersRouter);
+app.use('/api/orders', ordersRouter);
 app.use('/api/mocks', mocksRouter);
 if (config.nodeEnv === 'development') {
   app.use('/api/logger-test', loggerRouter);

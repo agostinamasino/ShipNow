@@ -25,6 +25,7 @@ test('OpenAPI define estructura 3.0.3, versión real, tags y contenedores docume
   assert.deepEqual(Object.keys(openapi.paths).sort(), [
     '/api/products', '/api/users', '/health', '/api/mocks/users', '/api/mocks/couriers',
     '/api/mocks/orders', '/api/mocks/deliveries', '/api/mocks/seed', '/api/logger-test',
+    '/api/orders', '/api/orders/{id}',
   ].sort());
   assert.ok(openapi.components.schemas.Product);
   assert.ok(openapi.components.responses.InternalError);

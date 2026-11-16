@@ -4,6 +4,7 @@ import schemas from '../docs/schemas.js';
 import responses from '../docs/responses.js';
 import productsPaths from '../docs/paths/products.js';
 import usersPaths from '../docs/paths/users.js';
+import ordersPaths from '../docs/paths/orders.js';
 import healthPaths from '../docs/paths/health.js';
 import mocksPaths from '../docs/paths/mocks.js';
 import loggerPaths from '../docs/paths/logger.js';
@@ -24,7 +25,7 @@ const openapi = {
   tags: [
     { name: 'Products', description: 'Productos.' },
     { name: 'Users', description: 'Usuarios y roles.' },
-    { name: 'Orders', description: 'Pedidos relacionados dentro del módulo de mocks, sin CRUD propio.' },
+    { name: 'Orders', description: 'Creación, listado y consulta de pedidos; también participan en mocks y seed.' },
     { name: 'Deliveries', description: 'Entregas relacionadas dentro del módulo de mocks, sin CRUD propio.' },
     { name: 'Mocks', description: 'Generación en memoria y carga de datos de prueba.' },
     { name: 'Logger', description: 'Demostración de logging disponible solo en desarrollo.' },
@@ -34,7 +35,7 @@ const openapi = {
     schemas,
     responses,
   },
-  paths: { ...productsPaths, ...usersPaths, ...healthPaths, ...mocksPaths, ...loggerPaths },
+  paths: { ...productsPaths, ...usersPaths, ...ordersPaths, ...healthPaths, ...mocksPaths, ...loggerPaths },
 };
 
 export default openapi;

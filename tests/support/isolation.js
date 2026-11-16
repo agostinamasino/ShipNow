@@ -5,6 +5,7 @@ import User from '../../src/models/User.js';
 import Product from '../../src/models/Product.js';
 import Order from '../../src/models/Order.js';
 import Delivery from '../../src/models/Delivery.js';
+import UploadedFile from '../../src/models/UploadedFile.js';
 import { stubs } from './helpers.js';
 
 const guards = stubs();
@@ -22,7 +23,7 @@ export const mochaHooks = {
     guards.replace(mongoose, 'connect', forbidden);
     guards.replace(mongoose.Connection.prototype, 'openUri', forbidden);
     guards.replace(mongoose.connection, 'transaction', forbidden);
-    for (const Model of [User, Product, Order, Delivery]) {
+    for (const Model of [User, Product, Order, Delivery, UploadedFile]) {
       for (const method of ['insertOne', 'insertMany', 'updateOne', 'updateMany', 'deleteOne', 'deleteMany', 'createIndex']) {
         guards.replace(Model.collection, method, forbidden);
       }

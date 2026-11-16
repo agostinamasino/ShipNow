@@ -8,6 +8,7 @@ import ordersPaths from '../docs/paths/orders.js';
 import healthPaths from '../docs/paths/health.js';
 import mocksPaths from '../docs/paths/mocks.js';
 import loggerPaths from '../docs/paths/logger.js';
+import filesPaths from '../docs/paths/files.js';
 
 const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 
@@ -35,7 +36,7 @@ const openapi = {
     schemas,
     responses,
   },
-  paths: { ...productsPaths, ...usersPaths, ...ordersPaths, ...healthPaths, ...mocksPaths, ...loggerPaths },
+  paths: { ...productsPaths, ...usersPaths, ...ordersPaths, ...healthPaths, ...mocksPaths, ...loggerPaths, ...filesPaths },
 };
 
 export default openapi;

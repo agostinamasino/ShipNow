@@ -26,3 +26,21 @@ export const ORDER_PRIORITY = Object.freeze({
   NORMAL: 'normal',
   HIGH: 'high',
 });
+
+export const DOCUMENT_TYPES = Object.freeze({
+  IDENTITY: 'identity',
+  ADDRESS_PROOF: 'address_proof',
+  DELIVERY_PROOF: 'delivery_proof',
+});
+
+export const FILE_MIME_TYPES = Object.freeze({
+  PDF: 'application/pdf', JPEG: 'image/jpeg', PNG: 'image/png',
+});
+
+export const FILE_OWNERS = Object.freeze({ USER: 'User', ORDER: 'Order' });
+
+export const UPLOAD_POLICY = Object.freeze({
+  maxSize: 5 * 1024 * 1024,
+  fieldName: 'file',
+  files: 1, fields: 1, parts: 2, fieldSize: 64, fieldNameSize: 64,
+});

@@ -1,12 +1,16 @@
 import { performance } from 'node:perf_hooks';
 import logger from '../config/logger.js';
 
-const routePrefixes = ['/api/products', '/api/users', '/api/orders', '/api/mocks', '/api/logger-test'];
+const routePrefixes = ['/api/products', '/api/users', '/api/orders', '/api/files', '/api/mocks', '/api/logger-test'];
 const httpMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'CONNECT', 'TRACE'];
 
 function routeTemplate(req, prefix) {
   if (!req.route) return 'UNMATCHED_ROUTE';
   if (typeof req.route.path !== 'string') return 'KNOWN_ROUTE';
+  // El router de archivos se monta en /api y ya incluye users/orders en su plantilla.
+  if (prefix.startsWith('/api/') && req.route.path.startsWith(prefix.slice(4) + '/')) {
+    return '/api' + req.route.path;
+  }
   return prefix + req.route.path;
 }
 

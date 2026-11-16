@@ -214,7 +214,8 @@ curl -i "$base/api/orders/$orderId"
 
 ## Constantes y compatibilidad de estados
 
-`src/constants/index.js` exporta cinco objetos inmutables mediante `Object.freeze`.
+`src/constants/index.js` exporta cinco objetos de dominio y cuatro objetos de
+archivos inmutables mediante `Object.freeze`. Los de dominio son:
 
 | Constante | Valor |
 | --- | --- |
@@ -422,6 +423,18 @@ incluyen `error.details.fields` con nombres de campos permitidos.
 | `MOCK_INVALID_SEED_RELATIONS` | 400 | Faltan usuarios para los pedidos o faltan pedidos distintos o repartidores para las entregas. |
 | `MOCK_SEED_UNAVAILABLE` | 503 | MongoDB no está disponible para el seed o rechaza la operación transaccional por falta de soporte. |
 | `INTERNAL_ERROR` | 500 | Fallo inesperado. El mensaje público es genérico. |
+| `FILE_REQUIRED` | 400 | Falta el archivo obligatorio. |
+| `FILE_INVALID_TYPE` | 415 | MIME, extensión o firma básica no permitidos o incoherentes. |
+| `FILE_TOO_LARGE` | 413 | Archivo de más de 5 MiB. |
+| `FILE_INVALID_FIELD` | 400 | Campo de archivo incorrecto o segundo archivo. |
+| `FILE_INVALID_DOCUMENT_TYPE` | 400 | Tipo documental ausente, inválido o incompatible. |
+| `FILE_INVALID_ENTITY_ID` | 400 | ID de entidad mal formado. |
+| `FILE_ENTITY_NOT_FOUND` | 404 | No existe el usuario o pedido indicado. |
+| `FILE_INVALID_REQUEST` | 400 | Formato de carga incorrecto, campos desconocidos o repetidos, o límites de campos/partes excedidos. |
+| `FILE_STORAGE_FAILED` | 500 | No se pudo almacenar el archivo. |
+| `FILE_METADATA_PERSISTENCE_FAILED` | 500 | No se pudieron guardar los metadatos. |
+| `FILE_INVALID_ID` | 400 | El identificador de los metadatos del archivo no es un ObjectId válido. |
+| `FILE_NOT_FOUND` | 404 | No existen los metadatos o el contenido físico del archivo. |
 
 El ejemplo anterior corresponde a HTTP 400 al enviar un producto con `price`
 inválido. Estos son otros cuerpos completos que devuelve la API.
@@ -532,13 +545,16 @@ evitar recursión.
 | Arranque | `SERVER_LISTENING` en `info`. |
 | MongoDB | `MONGODB_CONNECTED` en `info` o `MONGODB_CONNECTION_FAILED` en `error`. |
 | Servidor HTTP | `SERVER_LISTEN_FAILED` en `fatal`, con código de salida 1. |
-| Middleware global | `HTTP_ERROR code=... status=...` en `warning` para errores conocidos o `error` para `INTERNAL_ERROR`. |
+| Middleware global | `HTTP_ERROR code=... status=...` en `error` para HTTP 500, incluidos los fallos conocidos de archivos; `warning` para los demás errores actuales, incluido 503 del seed. |
 | Solicitudes | Un `HTTP_REQUEST method=... route=... status=... durationMs=...` en `http` al finalizar la respuesta. |
 | Products | `PRODUCT_CREATED` en `info`, `PRODUCTS_LISTED count=...` en `debug`. |
 | Users | `USER_CREATED` en `info`, `USERS_LISTED count=...` en `debug`. |
 | GET de mocks | `MOCK_PREVIEW entity=... qty=...` en `debug`, una vez por vista previa solicitada. |
 | Seed | `MOCK_SEED_STARTED users=... couriers=... orders=... deliveries=...` en `info`, tras validar las cantidades. |
 | Seed confirmado | `MOCK_SEED_COMPLETED users=... couriers=... orders=... deliveries=...` en `info`, después del commit. |
+| Archivos asociados | `FILE_UPLOAD_COMPLETED entity=... documentType=... size=...` en `info`, después de confirmar los metadatos. |
+| Consulta de archivos | `FILES_LISTED entity=... count=...` en `debug`. |
+| Fallo de limpieza | `FILE_CLEANUP_FAILED` en `error`, sin rutas ni mensajes internos. |
 
 Los services de Products, Users y mocks registran los éxitos descritos en la tabla.
 Orders utiliza el resumen HTTP y el middleware global, sin eventos de negocio propios.
@@ -651,7 +667,7 @@ Se utiliza OpenAPI **3.0.3** con `swagger-ui-express`.
 La configuración está en `src/config/swagger.js`, que obtiene la versión de
 `package.json` y el puerto de `config.port`. Los schemas y respuestas reutilizables
 se encuentran en `src/docs/schemas.js` y `src/docs/responses.js`. Las operaciones
-están separadas en `src/docs/paths/products.js`, `users.js`, `orders.js`, `health.js`, `mocks.js`
+están separadas en `src/docs/paths/products.js`, `users.js`, `orders.js`, `files.js`, `health.js`, `mocks.js`
 y `logger.js`.
 
 ### Iniciar y abrir la documentación
@@ -696,17 +712,18 @@ curl -i "$base/api/mocks/deliveries?qty=1"
 
 ### Alcance documentado
 
-La especificación contiene **14 operaciones** y **21 schemas reutilizables**.
+La especificación contiene **19 operaciones** y **24 schemas reutilizables**.
 
 | Tag | Operaciones o representación |
 | --- | --- |
 | Products | GET y POST `/api/products`. |
-| Users | GET y POST `/api/users`, y vistas previas de usuarios y repartidores con el tag Mocks. |
-| Orders | GET y POST `/api/orders`, GET `/api/orders/{id}` y GET `/api/mocks/orders`, junto con Mocks. También participa en el seed. |
+| Users | GET y POST `/api/users`, GET y POST `/api/users/{id}/documents`, y vistas previas de usuarios y repartidores con el tag Mocks. |
+| Orders | GET y POST `/api/orders`, GET `/api/orders/{id}`, GET y POST `/api/orders/{id}/receipts` y GET `/api/mocks/orders`, junto con Mocks. También participa en el seed. |
 | Deliveries | Schema de entrega y GET `/api/mocks/deliveries`, junto con Mocks. También participa en los lotes del seed. |
 | Mocks | Cuatro GET de vistas previas y POST `/api/mocks/seed`. |
 | Logger | GET `/api/logger-test`, herramienta de validación disponible solo en desarrollo. |
 | Health | GET `/health`. |
+| Users y Orders | GET `/api/files/{fileId}/download` recupera contenido asociado mediante su ID de metadatos. |
 
 Orders incluye creación y consultas propias; OpenAPI representa `:id` como `{id}`.
 Deliveries se documenta mediante su modelo, mocks y seed, sin rutas CRUD propias.
@@ -778,7 +795,7 @@ este HTTP 400 de mocks.
 
 Las validaciones de Products, Users y Orders pueden incluir `error.details.fields` con
 nombres de campos permitidos. Los ejemplos se construyen a partir del catálogo
-de 20 códigos. Si varios códigos usan el mismo status, aparecen como ejemplos
+de 32 códigos. Si varios códigos usan el mismo status, aparecen como ejemplos
 de una única respuesta OpenAPI, sin sobrescribirse.
 
 Ejecutá la regresión con estos comandos, válidos en ambos sistemas.
@@ -802,6 +819,9 @@ no envían solicitudes de seed y la suite existente usa MongoDB simulado, sin At
 ni archivos nuevos en la carpeta real `logs/`.
 
 ## Módulo 6 · Testing funcional
+
+Los conteos de esta sección describen el cierre del Módulo 6. La sección del
+Módulo 7 detalla la ampliación de cobertura y el resultado actual.
 
 La suite nueva usa **Mocha**, **Chai** y **Supertest**, instalados como
 `devDependencies`. Mocha ejecuta y organiza las pruebas, Chai verifica resultados
@@ -865,7 +885,7 @@ Las respuestas de error se comparan con el catálogo real, incluyendo
 inválido no consulte persistencia y que entradas rechazadas no inserten documentos.
 JSON `null` es rechazado por el parser estricto de Express con `INVALID_JSON` antes
 de llegar al service. Las comprobaciones documentales de regresión verifican las
-14 operaciones, schemas, enums, defaults, referencias `$ref`, ejemplos y respuestas
+las operaciones, schemas, enums, defaults, referencias `$ref`, ejemplos y respuestas
 HTTP con persistencia simulada.
 
 No se prueba actualización de estados: no existe PATCH y el dominio no define
@@ -913,3 +933,214 @@ otra etapa y una base aislada con soporte transaccional, nunca la base principal
 revisá los cambios con `git status --short`, ejecutá ambas suites y repetí `npm test`.
 El repositorio debe incluir los archivos nuevos de Orders, pruebas y OpenAPI al
 registrar manualmente los cambios; los comandos de testing no hacen commits ni pushes.
+
+## Módulo 7 · Documentos y comprobantes
+
+ShipNow permite asociar documentos a usuarios y comprobantes a pedidos mediante
+Multer 2.5.0. La configuración está centralizada en `src/config/multer.js`;
+`files.routes.js`, `file.controller.js`, `file.service.js` y `file.repository.js`
+mantienen las capas existentes. Los bytes se guardan en disco y únicamente los
+metadatos en la colección independiente del modelo `UploadedFile`. Los modelos
+User, Order y Delivery conservan sus contratos. No se modifican estados.
+
+| Método y ruta | Entrada y respuesta |
+| --- | --- |
+| POST `/api/users/:id/documents` | Multipart con `file` y `documentType`; HTTP 201 con metadatos. |
+| GET `/api/users/:id/documents` | HTTP 200 con array de metadatos de ese usuario. |
+| POST `/api/orders/:id/receipts` | Multipart con `file` y `documentType`; HTTP 201 con metadatos. |
+| GET `/api/orders/:id/receipts` | HTTP 200 con array de metadatos de ese pedido. |
+| GET `/api/files/:fileId/download` | HTTP 200 con el contenido binario del archivo asociado. |
+
+El parámetro `id` debe ser un ObjectId hexadecimal de 24 caracteres de una entidad
+existente. Se comprueba antes de iniciar la escritura. Un ID inválido devuelve 400
+`FILE_INVALID_ENTITY_ID`; una entidad inexistente, 404 `FILE_ENTITY_NOT_FOUND`.
+Una entidad existente sin archivos devuelve 200 y `[]`. Las referencias se derivan
+de la ruta: no se aceptan `ownerModel` ni `ownerId` en el body.
+
+### Multipart y límites
+
+| Campo | Reglas |
+| --- | --- |
+| `file` | Obligatorio, exactamente un archivo. PDF, JPEG o PNG; extensiones .pdf, .jpg, .jpeg o .png. |
+| `documentType` para User | Obligatorio: `identity` o `address_proof`. |
+| `documentType` para Order | Obligatorio: `delivery_proof`. |
+
+Máximo **5 MiB (5 242 880 bytes)** por archivo, un campo de texto y dos partes
+multipart. El archivo y el texto pueden enviarse en cualquier orden. Se rechazan
+campos adicionales o repetidos. MIME, extensión y firma básica deben coincidir;
+la firma básica no es un antivirus ni una validación completa del documento.
+No configurar manualmente el boundary: `curl.exe` y Swagger lo generan.
+
+`DOCUMENT_TYPES`, `FILE_MIME_TYPES`, `FILE_OWNERS` y `UPLOAD_POLICY` centralizan las
+políticas mediante `Object.freeze`. Los errores públicos se detallan en la tabla
+general: archivo faltante (400 `FILE_REQUIRED`), tipo incorrecto (415
+`FILE_INVALID_TYPE`), tamaño excedido (413 `FILE_TOO_LARGE`), campo incorrecto o
+segundo archivo (400 `FILE_INVALID_FIELD`), tipo documental incorrecto (400
+`FILE_INVALID_DOCUMENT_TYPE`) y formato/campos inválidos (400 `FILE_INVALID_REQUEST`).
+Los fallos de disco y metadatos usan `FILE_STORAGE_FAILED` y
+`FILE_METADATA_PERSISTENCE_FAILED`, ambos 500; otros fallos inesperados conservan
+`INTERNAL_ERROR`. Si se envía JSON, los errores globales del parser siguen aplicando.
+Los errores de archivos no incluyen `details` ni mensajes internos.
+
+### Ejemplos desde PowerShell
+
+Iniciá el servidor según [Ejecutar](#ejecutar), con una base de prueba conectada.
+Usá entidades existentes. Los siguientes comandos obtienen sus IDs reales; no
+crean usuarios ni pedidos. Si no existen, preparalos con los endpoints respectivos.
+**Los POST siguientes sí escriben archivos en disco y metadatos en MongoDB.**
+
+```powershell
+$base = 'http://localhost:3000'
+$usuarios = @(Invoke-RestMethod -Uri "$base/api/users")
+$pedidos = @(Invoke-RestMethod -Uri "$base/api/orders")
+if ($usuarios.Count -eq 0 -or $pedidos.Count -eq 0) { throw 'Se necesitan un usuario y un pedido existentes en la base de prueba' }
+$userId = $usuarios[0]._id
+$orderId = $pedidos[0]._id
+# Reemplazar por archivos PDF reales de prueba del equipo.
+$documento = (Resolve-Path './documento.pdf').Path
+$comprobante = (Resolve-Path './comprobante.pdf').Path
+curl.exe -i -X POST "$base/api/users/$userId/documents" -F "file=@$documento;type=application/pdf" -F 'documentType=identity'
+curl.exe -i -X POST "$base/api/orders/$orderId/receipts" -F "file=@$comprobante;type=application/pdf" -F 'documentType=delivery_proof'
+curl.exe -i "$base/api/users/$userId/documents"
+curl.exe -i "$base/api/orders/$orderId/receipts"
+```
+
+En Linux/macOS, utilizá `curl`, las rutas de archivos de tu equipo y variables
+`userId`/`orderId` obtenidas de tus GET reales. También se pueden usar Postman o
+Swagger: seleccionar multipart y adjuntar el archivo en `file`.
+
+Ejemplo ilustrativo de HTTP 201; estos IDs no representan entidades disponibles
+en tu base y no deben copiarse como entradas reales:
+
+```json
+{
+  "_id": "507f1f77bcf86cd799439051",
+  "ownerModel": "User",
+  "ownerId": "507f1f77bcf86cd799439011",
+  "originalName": "documento.pdf",
+  "filename": "5de0805a-f569-4ee2-a2b5-ea567c767991.pdf",
+  "path": "users/documents/5de0805a-f569-4ee2-a2b5-ea567c767991.pdf",
+  "mimeType": "application/pdf",
+  "size": 1234,
+  "documentType": "identity",
+  "uploadedAt": "2026-11-16T15:00:00.000Z",
+  "__v": 0
+}
+```
+
+El GET devuelve un array de esos objetos, sin orden garantizado. Filtra por
+`ownerModel` y `ownerId` y no devuelve archivos de otras entidades. Los comprobantes
+de pedido usan `ownerModel: "Order"` y `documentType: "delivery_proof"`.
+
+### Almacenamiento, compensación y límites del alcance
+
+Las carpetas se preparan bajo demanda, no al importar Express:
+
+```text
+uploads/
+  staging/
+  users/documents/
+  orders/receipts/
+```
+
+El nombre definitivo es un UUID generado por el servidor con extensión canónica.
+El nombre original normalizado solo se guarda como metadato. `path` es relativo a
+la raíz de almacenamiento: **no es una URL pública ni una ruta absoluta**.
+La carpeta no se sirve mediante `express.static` y `/uploads/` está excluida de Git.
+Los GET de documentos/comprobantes recuperan solo metadatos. El contenido se
+recupera mediante la descarga controlada por `_id`, descrita a continuación.
+
+El modelo registra `ownerModel`, `ownerId` con `refPath`, `originalName`, `filename`,
+`path`, `mimeType`, `size`, `documentType` y `uploadedAt`, además de `_id`/`__v` de
+Mongoose. Usa un índice compuesto por propietario. Nunca guarda el binario en MongoDB.
+
+Tras validar la entidad se recibe el temporal, se valida y mueve el archivo y se
+guardan sus metadatos. Ante validaciones fallidas se elimina staging; ante fallo de
+persistencia se intenta eliminar el definitivo. Una asociación ya confirmada no
+se elimina si luego falla la respuesta HTTP. Un fallo de limpieza se registra como
+`FILE_CLEANUP_FAILED` sin rutas internas. **No existe atomicidad entre MongoDB y
+disco**: una caída del proceso o resultado ambiguo de persistencia puede necesitar
+reconciliación manual. La raíz debe ser controlada por la aplicación.
+
+La API **no tiene autenticación ni autorización**. Validar que la entidad exista
+no comprueba quién puede acceder a sus documentos. Usar datos ficticios en el
+entorno académico; no exponer públicamente documentos personales reales.
+
+Winston registra `FILE_UPLOAD_COMPLETED` en info solo tras confirmar la asociación,
+`FILES_LISTED` en debug, rechazos mediante el middleware global en warning y fallos
+500 en error. No registra nombres originales, contenido, rutas internas ni IDs reales.
+
+### Pruebas y documentación interactiva
+
+Swagger en `/api/docs` documenta las cuatro operaciones con multipart, schemas
+`UserDocumentUpload`, `OrderReceiptUpload` y `UploadedFile`, y ejemplos de los diez
+errores de carga. También documenta la descarga binaria. El total actual es
+**19 operaciones y 24 schemas**.
+
+```sh
+npm run test:regression
+npm run test:functional
+npm test
+npm test
+```
+
+Las pruebas de uploads están en `tests/uploads/`: 28 de infraestructura y 43 de
+endpoints. Usan archivos reales únicamente en carpetas temporales aisladas,
+restauradas y eliminadas por hooks; Mongoose se simula. No requieren Atlas ni una
+base real y no demuestran persistencia MongoDB real o atomicidad. Las pruebas de
+documentación verifican también los contratos y `/api/docs` sin conexión.
+
+Resultado de referencia tras incorporar descarga: **378 aprobadas, 148 de regresión
+y 230 funcionales**, sin fallos. Las dos suites se ejecutan por separado dentro de `npm test`.
+
+### Descarga controlada
+
+`GET /api/files/:fileId/download` recupera el contenido binario. `fileId` es el
+`_id` de UploadedFile devuelto por un POST o GET de documentos/comprobantes,
+no el ID del usuario o pedido. El servidor busca los metadatos, comprueba que la
+entidad asociada exista y abre el archivo dentro de la raíz configurada. Rechaza
+rutas absolutas, traversal, symlinks/junctions y contenido que no sea archivo regular.
+No acepta rutas por query o body y no expone un directorio estático.
+
+Responde con `Content-Disposition: attachment` y nombre UUID generado seguro,
+`Content-Type` PDF/JPEG/PNG, tamaño real mediante `Content-Length` y
+`X-Content-Type-Options: nosniff`. No revela la ruta absoluta ni usa el nombre
+original del cliente para los encabezados. No borra el archivo al descargarlo.
+
+Ejemplo PowerShell, continuando con `$base` y `$userId` obtenidos de entidades
+existentes en los ejemplos anteriores:
+
+```powershell
+$documentos = @(Invoke-RestMethod -Uri "$base/api/users/$userId/documents")
+if ($documentos.Count -eq 0) { throw 'El usuario no tiene archivos asociados' }
+$fileId = $documentos[0]._id
+# Elegir un destino local; la extensión real puede ser pdf, jpg o png.
+$destino = Join-Path (Get-Location) $documentos[0].filename
+curl.exe --fail -o "$destino" "$base/api/files/$fileId/download"
+```
+
+En Linux/macOS, después de obtener un `fileId` real del GET de metadatos:
+
+```sh
+base='http://localhost:3000'
+printf 'ID de metadatos obtenido del GET: '
+read -r fileId
+curl --fail -o archivo-descargado "$base/api/files/$fileId/download"
+```
+
+ID inválido devuelve 400 `FILE_INVALID_ID`; ausencia de metadatos o de archivo físico,
+404 `FILE_NOT_FOUND`; entidad asociada eliminada, 404 `FILE_ENTITY_NOT_FOUND`.
+Una ruta almacenada insegura o un fallo de lectura devuelve 500 `FILE_STORAGE_FAILED`;
+fallos inesperados de consulta conservan `INTERNAL_ERROR`. Los errores anteriores
+a enviar headers usan el formato JSON centralizado. Si la lectura falla después,
+se registra `FILE_DOWNLOAD_STREAM_FAILED` y se corta la respuesta binaria, sin
+agregar JSON. La cancelación del cliente cierra el descriptor y conserva el archivo.
+
+La descarga **no incorpora autenticación ni autorización**: conocer un ID permite
+solicitar el archivo. No usar documentos personales reales ni exponer esta API
+académica como un servicio público. La raíz debe estar controlada por la aplicación;
+la descarga no agrega antivirus ni resuelve la falta de atomicidad entre disco y MongoDB.
+
+`tests/uploads/download.test.js` agrega 25 casos con disco temporal y MongoDB simulado:
+PDF/JPEG/PNG, bytes exactos, headers, errores, traversal, junctions, aislamiento de
+raíces, fallos antes/después de headers y cancelación con cierre de descriptor.

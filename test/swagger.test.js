@@ -26,6 +26,8 @@ test('OpenAPI define estructura 3.0.3, versión real, tags y contenedores docume
     '/api/products', '/api/users', '/health', '/api/mocks/users', '/api/mocks/couriers',
     '/api/mocks/orders', '/api/mocks/deliveries', '/api/mocks/seed', '/api/logger-test',
     '/api/orders', '/api/orders/{id}',
+    '/api/users/{id}/documents', '/api/orders/{id}/receipts',
+    '/api/files/{fileId}/download',
   ].sort());
   assert.ok(openapi.components.schemas.Product);
   assert.ok(openapi.components.responses.InternalError);

@@ -1,4 +1,4 @@
-import { PRODUCT_STATUS, USER_ROLES, ORDER_STATUS, DELIVERY_STATUS, ORDER_PRIORITY } from '../constants/index.js';
+import { PRODUCT_STATUS, USER_ROLES, ORDER_STATUS, DELIVERY_STATUS, ORDER_PRIORITY, DOCUMENT_TYPES, FILE_MIME_TYPES, FILE_OWNERS, UPLOAD_POLICY } from '../constants/index.js';
 import { ERROR_CATALOG } from '../errors/error.catalog.js';
 
 const productProperties = {
@@ -49,6 +49,39 @@ function mockResponse(properties) {
 }
 
 export default {
+  UserDocumentUpload: {
+    type: 'object', required: ['file', 'documentType'], additionalProperties: false,
+    description: 'Un archivo y un campo de texto, en cualquier orden. No se admiten campos desconocidos o repetidos, ownerModel ni ownerId. El servidor valida MIME, extensión y firma básica.',
+    properties: {
+      file: { type: 'string', format: 'binary', description: `Archivo obligatorio PDF, JPEG o PNG. Máximo ${UPLOAD_POLICY.maxSize} bytes (5 MiB); extensiones .pdf, .jpg, .jpeg o .png coherentes con el contenido.` },
+      documentType: { type: 'string', enum: [DOCUMENT_TYPES.IDENTITY, DOCUMENT_TYPES.ADDRESS_PROOF] },
+    },
+  },
+  OrderReceiptUpload: {
+    type: 'object', required: ['file', 'documentType'], additionalProperties: false,
+    description: 'Un comprobante y un campo de texto, en cualquier orden. No se admiten campos desconocidos o repetidos. No modifica estados ni crea entregas.',
+    properties: {
+      file: { type: 'string', format: 'binary', description: `Archivo obligatorio PDF, JPEG o PNG. Máximo ${UPLOAD_POLICY.maxSize} bytes (5 MiB); extensiones .pdf, .jpg, .jpeg o .png coherentes con el contenido.` },
+      documentType: { type: 'string', enum: [DOCUMENT_TYPES.DELIVERY_PROOF] },
+    },
+  },
+  UploadedFile: {
+    type: 'object',
+    required: ['_id', 'ownerModel', 'ownerId', 'originalName', 'filename', 'path', 'mimeType', 'size', 'documentType', 'uploadedAt'],
+    description: 'Metadatos persistidos, sin bytes del archivo. ownerModel y ownerId se derivan de la ruta. El nombre generado y la ruta relativa son internos al almacenamiento, no una URL pública. Para descargar se usa el _id con GET /api/files/{fileId}/download. El tipo documental debe ser compatible con la entidad.',
+    properties: {
+      ...persistedProperties,
+      ownerModel: { type: 'string', enum: Object.values(FILE_OWNERS) },
+      ownerId: { $ref: '#/components/schemas/ObjectId' },
+      originalName: { type: 'string', minLength: 1, maxLength: 255, description: 'Nombre original normalizado para metadatos; no se utiliza para construir rutas.' },
+      filename: { type: 'string', pattern: '^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\\.(pdf|jpg|png)$' },
+      path: { type: 'string', pattern: '^(users/documents|orders/receipts)/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\\.(pdf|jpg|png)$', description: 'Ruta relativa a uploads/. Nunca una ruta absoluta ni un enlace público.' },
+      mimeType: { type: 'string', enum: Object.values(FILE_MIME_TYPES) },
+      size: { type: 'integer', minimum: 1, maximum: UPLOAD_POLICY.maxSize, description: 'Tamaño real en bytes.' },
+      documentType: { type: 'string', enum: Object.values(DOCUMENT_TYPES) },
+      uploadedAt: { type: 'string', format: 'date-time', description: 'Fecha generada por el servidor.' },
+    },
+  },
   ObjectId: { type: 'string', pattern: '^[0-9a-fA-F]{24}$', example: '507f1f77bcf86cd799439011' },
   ProductCreate: {
     type: 'object',

@@ -19,6 +19,18 @@ const entries = [
   ['MOCK_INVALID_SEED_RELATIONS', 'El lote no cumple las dependencias entre entidades.', 400],
   ['MOCK_SEED_UNAVAILABLE', 'El seed requiere una conexión MongoDB con soporte para transacciones.', 503],
   ['INTERNAL_ERROR', 'Error interno del servidor.', 500],
+  ['FILE_REQUIRED', 'Debés enviar un archivo.', 400],
+  ['FILE_INVALID_TYPE', 'El tipo de archivo no está permitido.', 415],
+  ['FILE_TOO_LARGE', 'El archivo supera el tamaño permitido.', 413],
+  ['FILE_INVALID_FIELD', 'El campo de archivo no es válido.', 400],
+  ['FILE_INVALID_DOCUMENT_TYPE', 'El tipo de documento no es válido para esta entidad.', 400],
+  ['FILE_INVALID_ENTITY_ID', 'El identificador de la entidad no es válido.', 400],
+  ['FILE_ENTITY_NOT_FOUND', 'La entidad referenciada no existe.', 404],
+  ['FILE_INVALID_REQUEST', 'Revisá el formato de la solicitud de carga.', 400],
+  ['FILE_STORAGE_FAILED', 'No se pudo almacenar el archivo.', 500],
+  ['FILE_METADATA_PERSISTENCE_FAILED', 'No se pudieron guardar los metadatos del archivo.', 500],
+  ['FILE_INVALID_ID', 'El identificador del archivo no es válido.', 400],
+  ['FILE_NOT_FOUND', 'El archivo solicitado no existe.', 404],
 ];
 
 export const ERROR_CATALOG = Object.freeze(Object.fromEntries(

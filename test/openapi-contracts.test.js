@@ -19,6 +19,9 @@ import loggerRouter from '../src/routes/logger.routes.js';
 import ordersRouter from '../src/routes/orders.routes.js';
 import request from 'supertest';
 import { ORDER_PRIORITY } from '../src/constants/index.js';
+import { DOCUMENT_TYPES, FILE_MIME_TYPES, FILE_OWNERS, UPLOAD_POLICY } from '../src/constants/index.js';
+import UploadedFile from '../src/models/UploadedFile.js';
+import { createFilesRouter } from '../src/routes/files.routes.js';
 
 function resolveRef(reference) {
   assert.ok(reference.startsWith('#/'));
@@ -61,6 +64,7 @@ function assertMatches(rawSchema, value) {
   if (schema.minimum !== undefined) assert.ok(value >= schema.minimum);
   if (schema.maximum !== undefined) assert.ok(value <= schema.maximum);
   if (schema.minLength !== undefined) assert.ok(value.length >= schema.minLength);
+  if (schema.maxLength !== undefined) assert.ok(value.length <= schema.maxLength);
   if (schema.pattern) assert.match(value, new RegExp(schema.pattern));
 }
 
@@ -70,7 +74,7 @@ function visit(value, inspect) {
   for (const child of Object.values(value)) visit(child, inspect);
 }
 
-test('se documentan exactamente las catorce operaciones existentes con métodos y tags correctos', () => {
+test('se documentan exactamente las diecinueve operaciones existentes con métodos y tags correctos', () => {
   const operations = Object.entries(document.paths).flatMap(([path, methods]) =>
     Object.entries(methods).map(([method, operation]) => [method, path, operation.tags]));
   assert.deepEqual(operations, [
@@ -85,6 +89,9 @@ test('se documentan exactamente las catorce operaciones existentes con métodos 
     ['get', '/api/mocks/deliveries', ['Deliveries', 'Mocks']],
     ['post', '/api/mocks/seed', ['Mocks']],
     ['get', '/api/logger-test', ['Logger']],
+    ['post', '/api/users/{id}/documents', ['Users']], ['get', '/api/users/{id}/documents', ['Users']],
+    ['post', '/api/orders/{id}/receipts', ['Orders']], ['get', '/api/orders/{id}/receipts', ['Orders']],
+    ['get', '/api/files/{fileId}/download', ['Users', 'Orders']],
   ]);
   for (const [prefix, router] of [['/api/products', productsRouter], ['/api/users', usersRouter]]) {
     const actualMethods = router.stack.filter(layer => layer.route).flatMap(layer => {
@@ -99,13 +106,13 @@ test('se documentan exactamente las catorce operaciones existentes con métodos 
       assert.deepEqual(Object.keys(document.paths[path]), Object.keys(layer.route.methods));
     }
   }
-  assert.equal(new Set(operations.map(([method, path]) => document.paths[path][method].operationId)).size, 14);
+  assert.equal(new Set(operations.map(([method, path]) => document.paths[path][method].operationId)).size, 19);
   for (const [path, methods] of Object.entries(document.paths)) {
     for (const operation of Object.values(methods)) {
       for (const parameter of operation.parameters ?? []) {
-        if (path === '/api/orders/{id}') {
+        if (path.includes('{id}') || path.includes('{fileId}')) {
           assert.equal(parameter.in, 'path');
-          assert.equal(parameter.name, 'id');
+          assert.equal(parameter.name, path.includes('{fileId}') ? 'fileId' : 'id');
           assert.equal(parameter.required, true);
         } else {
           assert.equal(parameter.in, 'query');
@@ -119,12 +126,12 @@ test('se documentan exactamente las catorce operaciones existentes con métodos 
   }
 });
 
-test('los veintiún schemas existen y todos los $ref del documento se resuelven', () => {
+test('los veinticuatro schemas existen y todos los $ref del documento se resuelven', () => {
   assert.deepEqual(Object.keys(document.components.schemas).sort(),
     ['ObjectId', 'ProductCreate', 'Product', 'UserCreate', 'User', 'ErrorResponse', 'HealthResponse',
       'Order', 'OrderCreate', 'Delivery', 'MockUser', 'MockCourier', 'MockOrder', 'MockDelivery',
       'MockUsersResponse', 'MockCouriersResponse', 'MockOrdersResponse', 'MockDeliveriesResponse',
-      'SeedCounts', 'SeedRequest', 'SeedResponse'].sort());
+      'SeedCounts', 'SeedRequest', 'SeedResponse', 'UploadedFile', 'UserDocumentUpload', 'OrderReceiptUpload'].sort());
   visit(document, value => { if (value.$ref) resolveRef(value.$ref); });
 });
 
@@ -384,6 +391,10 @@ test('Orders documenta exactamente los métodos del router sin PATCH ni CRUD de 
     Object.keys(route.methods).map(method => [
       '/api/orders' + (route.path === '/' ? '' : route.path.replace(':id', '{id}')), method,
     ]));
+  actual.push(...createFilesRouter().stack.filter(layer => layer.route?.path.startsWith('/orders/'))
+    .flatMap(({ route }) => Object.keys(route.methods).map(method => [
+      '/api' + route.path.replace(':id', '{id}'), method,
+    ])));
   const documented = Object.entries(document.paths).filter(([path]) => path.startsWith('/api/orders'))
     .flatMap(([path, methods]) => Object.keys(methods).map(method => [path, method]));
   assert.deepEqual(documented, actual);
@@ -511,4 +522,166 @@ test('ejemplos OpenAPI de Orders coinciden con respuestas HTTP y validación rea
   const missing = await request(app).post('/api/orders').send(media.examples.minimal.value).expect(404);
   assert.deepEqual(missing.body, dereference(collection.post.responses[404]).content['application/json'].examples.ORDER_USER_NOT_FOUND.value);
   assert.equal(mongoose.connection.readyState, 0);
+});
+
+const filePaths = ['/api/users/{id}/documents', '/api/orders/{id}/receipts'];
+
+test('las cinco operaciones de archivos coinciden con el router real y sus parámetros', () => {
+  const actual = createFilesRouter().stack.filter(layer => layer.route).flatMap(({ route }) =>
+    Object.keys(route.methods).map(method => ['/api' + route.path.replace(/:(\w+)/g, '{$1}'), method]));
+  const documented = [...filePaths, '/api/files/{fileId}/download'].flatMap(path => Object.keys(document.paths[path]).map(method => [path, method]));
+  assert.deepEqual(documented, actual);
+  for (const path of filePaths) {
+    for (const operation of Object.values(document.paths[path])) {
+      assert.deepEqual(operation.parameters.map(({ name, in: location, required, schema }) => ({ name, location, required, schema })),
+        [{ name: 'id', location: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } }]);
+      assert.ok(operation.description.includes('existencia'));
+    }
+  }
+});
+
+test('multipart documenta archivo binario, tipos obligatorios, límites y restricciones reales', () => {
+  for (const [index, schemaName] of ['UserDocumentUpload', 'OrderReceiptUpload'].entries()) {
+    const operation = document.paths[filePaths[index]].post;
+    assert.equal(operation.requestBody.required, true);
+    assert.deepEqual(Object.keys(operation.requestBody.content), ['multipart/form-data']);
+    const media = operation.requestBody.content['multipart/form-data'];
+    assert.equal(media.schema.$ref, '#/components/schemas/' + schemaName);
+    assert.equal(media.encoding.file.contentType, Object.values(FILE_MIME_TYPES).join(', '));
+    const schema = dereference(media.schema);
+    assert.deepEqual(schema.required, ['file', 'documentType']);
+    assert.deepEqual(Object.keys(schema.properties), ['file', 'documentType']);
+    assert.equal(schema.additionalProperties, false);
+    assert.equal(schema.properties.file.type, 'string');
+    assert.equal(schema.properties.file.format, 'binary');
+    assert.ok(schema.properties.file.description.includes(String(UPLOAD_POLICY.maxSize)));
+    assert.deepEqual(schema.properties.documentType.enum, index === 0
+      ? [DOCUMENT_TYPES.IDENTITY, DOCUMENT_TYPES.ADDRESS_PROOF] : [DOCUMENT_TYPES.DELIVERY_PROOF]);
+    assert.equal(document.paths[filePaths[index]].get.requestBody, undefined);
+  }
+});
+
+test('UploadedFile representa los campos reales y sus ejemplos validan contra Mongoose sin persistir', async () => {
+  const schema = document.components.schemas.UploadedFile;
+  assert.deepEqual(Object.keys(schema.properties).sort(), Object.keys(UploadedFile.schema.paths).sort());
+  assert.deepEqual(schema.properties.ownerModel.enum, Object.values(FILE_OWNERS));
+  assert.deepEqual(schema.properties.mimeType.enum, Object.values(FILE_MIME_TYPES));
+  assert.deepEqual(schema.properties.documentType.enum, Object.values(DOCUMENT_TYPES));
+  assert.equal(schema.properties.size.maximum, UPLOAD_POLICY.maxSize);
+  assert.equal(schema.properties.size.minimum, 1);
+  assert.equal(schema.properties.uploadedAt.format, 'date-time');
+  assert.equal(schema.properties.path.format, undefined);
+  for (const path of filePaths) {
+    const operation = document.paths[path];
+    const media = operation.post.responses[201].content['application/json'];
+    assert.equal(media.schema.$ref, '#/components/schemas/UploadedFile');
+    assertMatches(media.schema, media.example);
+    await new UploadedFile(media.example).validate();
+    assert.equal(new Date(media.example.uploadedAt).toISOString(), media.example.uploadedAt);
+    const listed = operation.get.responses[200].content['application/json'];
+    assert.deepEqual(listed.schema, { type: 'array', items: { $ref: '#/components/schemas/UploadedFile' } });
+    assertMatches(listed.schema, listed.examples.populated.value);
+    assert.deepEqual(listed.examples.populated.value, [media.example]);
+    assert.deepEqual(listed.examples.empty.value, []);
+  }
+});
+
+test('archivos documenta sus errores reales, sus status y mensajes, sin detalles internos', () => {
+  const covered = new Set();
+  for (const path of filePaths) {
+    const operations = document.paths[path];
+    assert.deepEqual(Object.keys(operations.post.responses), ['201', '400', '404', '413', '415', '500']);
+    assert.deepEqual(Object.keys(operations.get.responses), ['200', '400', '404', '413', '500']);
+    for (const operation of Object.values(operations)) {
+      for (const [status, raw] of Object.entries(operation.responses)) {
+        if (+status < 400) continue;
+        for (const [code, { value }] of Object.entries(dereference(raw).content['application/json'].examples)) {
+          assert.equal(ERROR_CATALOG[code].status, +status);
+          assert.deepEqual(value, { success: false, error: { code, message: ERROR_CATALOG[code].message } });
+          covered.add(code);
+        }
+      }
+    }
+  }
+  for (const [status, raw] of Object.entries(document.paths['/api/files/{fileId}/download'].get.responses)) {
+    if (+status < 400) continue;
+    for (const [code, { value }] of Object.entries(dereference(raw).content['application/json'].examples)) {
+      assert.equal(ERROR_CATALOG[code].status, +status);
+      assert.equal(value.error.message, ERROR_CATALOG[code].message);
+      covered.add(code);
+    }
+  }
+  const fileCodes = Object.keys(ERROR_CATALOG).filter(code => code.startsWith('FILE_'));
+  assert.equal(fileCodes.length, 12);
+  assert.ok(fileCodes.every(code => covered.has(code)));
+  for (const code of ['INVALID_JSON', 'PAYLOAD_TOO_LARGE', 'INTERNAL_ERROR']) assert.ok(covered.has(code));
+});
+
+test('GET de metadatos respeta ejemplos documentados sin disco ni MongoDB', async t => {
+  const app = express();
+  app.use('/api', createFilesRouter());
+  app.use(errorMiddleware);
+  t.mock.method(mongoose, 'connect', () => { throw new Error('Conexión prohibida'); });
+  t.mock.method(User, 'findById', () => ({ select: async () => ({ _id: 'existing' }) }));
+  t.mock.method(Order, 'findById', async () => ({ _id: 'existing' }));
+  t.mock.method(UploadedFile, 'create', () => { throw new Error('Escritura prohibida'); });
+  const find = t.mock.method(UploadedFile, 'find', async () => []);
+  for (const [index, path] of filePaths.entries()) {
+    const operation = document.paths[path].get;
+    const id = operation.parameters[0].example;
+    const response = await request(app).get(path.replace('{id}', id)).expect(200);
+    assert.deepEqual(response.body, operation.responses[200].content['application/json'].examples.empty.value);
+    assertMatches(operation.responses[200].content['application/json'].schema, response.body);
+    assert.deepEqual(find.mock.calls[index].arguments[0], { ownerModel: index ? FILE_OWNERS.ORDER : FILE_OWNERS.USER, ownerId: id });
+  }
+  assert.equal(mongoose.connection.readyState, 0);
+});
+
+test('documentación solo declara la descarga controlada, sin enlaces públicos ni autenticación', () => {
+  for (const path of Object.keys(document.paths)) {
+    if (path !== '/api/files/{fileId}/download') assert.ok(!/download|\/uploads|\/files\//.test(path));
+  }
+  for (const path of filePaths) {
+    const operation = document.paths[path].post;
+    assert.ok(operation.description.includes('ESCRIBE'));
+    assert.ok(operation.description.includes('No dispone de autenticación'));
+    assert.equal(operation.security, undefined);
+    const example = operation.responses[201].content['application/json'].example;
+    assert.equal(example.url, undefined);
+    assert.equal(example.downloadUrl, undefined);
+    assert.ok(!example.path.startsWith('/'));
+    assert.ok(!example.path.includes('://'));
+  }
+});
+
+test('descarga OpenAPI documenta bytes, MIME, headers seguros y parámetro obligatorio', () => {
+  const operation = document.paths['/api/files/{fileId}/download'].get;
+  assert.equal(operation.operationId, 'downloadFile');
+  assert.equal(operation.requestBody, undefined);
+  assert.deepEqual(operation.parameters.map(({ name, in: location, required, schema }) => ({ name, location, required, schema })),
+    [{ name: 'fileId', location: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } }]);
+  const response = operation.responses[200];
+  assert.deepEqual(Object.keys(response.content), Object.values(FILE_MIME_TYPES));
+  for (const media of Object.values(response.content)) assert.deepEqual(media.schema, { type: 'string', format: 'binary' });
+  assert.ok(response.headers['Content-Disposition'].example.startsWith('attachment; filename="'));
+  assert.deepEqual(response.headers['X-Content-Type-Options'].schema.enum, ['nosniff']);
+  assert.equal(response.headers['Content-Length'].schema.type, 'integer');
+  assert.equal(response.content['application/json'], undefined);
+});
+
+test('descarga OpenAPI describe errores antes de headers e interrupción durante streaming', () => {
+  const operation = document.paths['/api/files/{fileId}/download'].get;
+  assert.deepEqual(Object.keys(operation.responses), ['200', '400', '404', '413', '500']);
+  for (const [status, codes] of [[400, ['FILE_INVALID_ID', 'INVALID_JSON']],
+    [404, ['FILE_NOT_FOUND', 'FILE_ENTITY_NOT_FOUND']], [500, ['FILE_STORAGE_FAILED', 'INTERNAL_ERROR']]]) {
+    const examples = dereference(operation.responses[status]).content['application/json'].examples;
+    assert.deepEqual(Object.keys(examples), codes);
+    for (const [code, { value }] of Object.entries(examples)) {
+      assert.deepEqual(value, { success: false, error: { code, message: ERROR_CATALOG[code].message } });
+    }
+  }
+  for (const phrase of ['symlinks', 'archivo regular', 'No recibe rutas', 'sin agregar JSON', 'No tiene autenticación']) {
+    assert.ok(operation.description.includes(phrase), phrase);
+  }
+  assert.equal(operation.security, undefined);
 });

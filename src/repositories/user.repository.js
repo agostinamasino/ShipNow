@@ -22,6 +22,10 @@ export function findByEmail(email) {
   return User.findOne({ email });
 }
 
+export function findById(id) {
+  return User.findById(id).select('_id');
+}
+
 export async function create(data) {
   const user = new User(data);
   await user.validate();

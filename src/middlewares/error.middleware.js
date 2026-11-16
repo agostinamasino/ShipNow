@@ -14,7 +14,7 @@ export function errorMiddleware(err, req, res, next) {
     entry = ERROR_CATALOG.PAYLOAD_TOO_LARGE;
   }
 
-  const severity = entry.code === 'INTERNAL_ERROR' ? 'error' : 'warning';
+  const severity = entry.status === 500 ? 'error' : 'warning';
   logger[severity](`HTTP_ERROR code=${entry.code} status=${entry.status}`);
 
   const error = { code: entry.code, message: entry.message };

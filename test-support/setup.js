@@ -1,4 +1,4 @@
-// Se ejecuta solo mediante npm test, antes de importar módulos de la aplicación.
+// Se ejecuta antes de importar la aplicación en ambas suites de pruebas.
 // Las variables heredadas o el .env local no pueden habilitar logs ni conexiones reales.
 Object.assign(process.env, {
   NODE_ENV: 'test',

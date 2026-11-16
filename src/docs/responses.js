@@ -24,4 +24,10 @@ export default {
   ProductBadRequest: errorResponse(['PRODUCT_VALIDATION_FAILED', 'PRODUCT_INVALID_STATUS', 'INVALID_JSON']),
   UserBadRequest: errorResponse(['USER_VALIDATION_FAILED', 'USER_INVALID_ROLE', 'INVALID_JSON']),
   UserEmailConflict: errorResponse(['USER_EMAIL_ALREADY_EXISTS']),
+  MockBadRequest: errorResponse(['MOCK_INVALID_QTY', 'INVALID_JSON']),
+  SeedBadRequest: errorResponse([
+    'MOCK_INVALID_QTY', 'MOCK_INVALID_SEED_REQUEST', 'MOCK_INVALID_SEED_RELATIONS', 'INVALID_JSON',
+  ]),
+  SeedUnavailable: errorResponse(['MOCK_SEED_UNAVAILABLE']),
+  RouteNotFound: errorResponse(['ROUTE_NOT_FOUND']),
 };

@@ -1,3 +1,4 @@
+import { paginationSchemas } from './pagination.js';
 import { PRODUCT_STATUS, USER_ROLES, ORDER_STATUS, DELIVERY_STATUS, ORDER_PRIORITY, DOCUMENT_TYPES, FILE_MIME_TYPES, FILE_OWNERS, UPLOAD_POLICY } from '../constants/index.js';
 import { ERROR_CATALOG } from '../errors/error.catalog.js';
 
@@ -49,6 +50,7 @@ function mockResponse(properties) {
 }
 
 export default {
+  ...paginationSchemas,
   UserDocumentUpload: {
     type: 'object', required: ['file', 'documentType'], additionalProperties: false,
     description: 'Un archivo y un campo de texto, en cualquier orden. No se admiten campos desconocidos o repetidos, ownerModel ni ownerId. El servidor valida MIME, extensión y firma básica.',

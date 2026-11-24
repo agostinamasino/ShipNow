@@ -1,3 +1,4 @@
+import { mockList, pageOf } from '../../test-support/pagination.js';
 import { expect } from 'chai';
 import request from 'supertest';
 import { mkdtemp, readdir, readFile, writeFile, mkdir, unlink, rm } from 'node:fs/promises';
@@ -42,7 +43,7 @@ describe('Documentos y comprobantes por HTTP, MongoDB simulado y disco temporal'
       saved.push(doc);
       return doc;
     });
-    doubles.replace(UploadedFile, 'find', async filter => {
+    mockList(doubles.replace.bind(doubles), UploadedFile, async filter => {
       filters.push(filter);
       return saved.filter(file => file.ownerModel === filter.ownerModel && String(file.ownerId) === filter.ownerId);
     });
@@ -106,7 +107,7 @@ describe('Documentos y comprobantes por HTTP, MongoDB simulado y disco temporal'
       expect(logs.filter(event => event.message.startsWith('FILE_UPLOAD_COMPLETED'))).to.have.lengthOf(1);
       expect(logs.find(event => event.message.startsWith('FILE_UPLOAD_COMPLETED')).level).to.equal('info');
       const listed = await request(app).get(route(entity)).expect(200);
-      expect(listed.body).to.deep.equal([response.body]);
+      expect(listed.body).to.deep.equal(pageOf([response.body]));
       expect(filters).to.deep.equal([{ ownerModel, ownerId }]);
       expect(logs.filter(event => event.message.startsWith('FILES_LISTED'))).to.deep.equal([
         { level: 'debug', message: `FILES_LISTED entity=${ownerModel} count=1` },
@@ -119,7 +120,7 @@ describe('Documentos y comprobantes por HTTP, MongoDB simulado y disco temporal'
       expect(summaries[1].message).to.include(`method=GET route=${template} status=200`);
     });
     it(`GET ${entity} existente sin archivos: 200 y []`, async () => {
-      expect((await request(app).get(route(entity)).expect(200)).body).to.deep.equal([]);
+      expect((await request(app).get(route(entity)).expect(200)).body).to.deep.equal(pageOf([]));
       expect(await files()).to.deep.equal([]);
     });
     for (const method of ['get', 'post']) {
@@ -143,9 +144,9 @@ describe('Documentos y comprobantes por HTTP, MongoDB simulado y disco temporal'
     for (const entity of ['users', 'orders']) {
       for (const id of entity === 'users' ? users : orders) {
         const response = await request(app).get(route(entity, id)).expect(200);
-        expect(response.body).to.have.lengthOf(1);
-        expect(response.body[0].ownerId).to.equal(id);
-        expect(response.body[0].ownerModel).to.equal(entity === 'users' ? FILE_OWNERS.USER : FILE_OWNERS.ORDER);
+        expect(response.body.data).to.have.lengthOf(1);
+        expect(response.body.data[0].ownerId).to.equal(id);
+        expect(response.body.data[0].ownerModel).to.equal(entity === 'users' ? FILE_OWNERS.USER : FILE_OWNERS.ORDER);
       }
     }
   });
@@ -270,7 +271,7 @@ describe('Documentos y comprobantes por HTTP, MongoDB simulado y disco temporal'
     expect(logs.filter(event => event.message.startsWith('FILE_UPLOAD_COMPLETED'))).to.have.lengthOf(1);
   });
   it('fallo inesperado al consultar metadatos sigue siendo 500 seguro', async () => {
-    doubles.replace(UploadedFile, 'find', async () => { throw new Error(secret); });
+    mockList(doubles.replace.bind(doubles), UploadedFile, async () => { throw new Error(secret); });
     expectError(await request(app).get(route()), 'INTERNAL_ERROR');
     classification('INTERNAL_ERROR', 'error');
     expect(logs.some(event => event.message.startsWith('FILES_LISTED'))).to.equal(false);

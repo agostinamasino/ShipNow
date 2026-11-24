@@ -1,3 +1,4 @@
+import { mockList, pageOf } from '../../test-support/pagination.js';
 import { expect } from 'chai';
 import request from 'supertest';
 import app from '../../src/app.js';
@@ -19,12 +20,12 @@ describe('Products por HTTP con persistencia simulada', () => {
   afterEach(() => doubles.restore());
   it('GET devuelve 200 y el producto controlado con tipos correctos', async () => {
     const products = [{ _id: id, name: 'Caja', description: '', price: 1500, stock: 20, status: PRODUCT_STATUS.AVAILABLE, __v: 0 }];
-    doubles.replace(Product, 'find', () => ({ lean: async () => products }));
+    mockList(doubles.replace.bind(doubles), Product, () => ({ lean: async () => products }));
     const response = await request(app).get('/api/products').expect(200);
-    expect(response.body).to.deep.equal(products);
+    expect(response.body).to.deep.equal(pageOf(products));
   });
   it('GET falla con 500 seguro ante error de persistencia', async () => {
-    doubles.replace(Product, 'find', () => ({ lean: async () => { throw new Error(secret); } }));
+    mockList(doubles.replace.bind(doubles), Product, () => ({ lean: async () => { throw new Error(secret); } }));
     expectError(await request(app).get('/api/products'), 'INTERNAL_ERROR');
   });
   it('POST crea con 201, campos reales y defaults', async () => {

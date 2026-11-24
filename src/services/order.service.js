@@ -1,3 +1,4 @@
+import { parsePagination, paginated } from '../utils/pagination.js';
 import * as orderRepository from '../repositories/order.repository.js';
 import { ORDER_STATUS, ORDER_PRIORITY, USER_ROLES } from '../constants/index.js';
 import { AppError } from '../errors/app-error.js';
@@ -6,8 +7,10 @@ function isObjectId(value) {
   return typeof value === 'string' && /^[0-9a-fA-F]{24}$/.test(value);
 }
 
-export function getOrders() {
-  return orderRepository.findAll();
+export async function getOrders(query) {
+  const options = parsePagination(query);
+  const { data, total } = await orderRepository.findAll(options);
+  return paginated(data, total, options);
 }
 
 export async function getOrderById(id) {

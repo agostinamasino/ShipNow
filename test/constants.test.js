@@ -1,3 +1,4 @@
+import { mockList, pageOf } from '../test-support/pagination.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PRODUCT_STATUS, USER_ROLES, ORDER_STATUS, DELIVERY_STATUS, ORDER_PRIORITY } from '../src/constants/index.js';
@@ -20,10 +21,11 @@ test('constantes: valores e inmutabilidad', () => {
 });
 
 test('GET Products usa lean y convierte copias sin alterar los documentos leídos', async (t) => {
-  const stored = [{ _id: 'old-true', status: true }, { _id: 'old-false', status: false },
-    { _id: 'new', status: PRODUCT_STATUS.OUT_OF_STOCK }];
-  t.mock.method(Product, 'find', () => ({ lean: async () => stored }));
-  const result = await getProducts();
+  const stored = [{ _id: '000000000000000000000001', status: true }, { _id: '000000000000000000000002', status: false },
+    { _id: '000000000000000000000003', status: PRODUCT_STATUS.OUT_OF_STOCK }];
+  mockList(t.mock.method.bind(t.mock), Product, () => ({ lean: async () => stored }));
+  const { data: result, pagination } = await getProducts();
+  assert.deepEqual(pagination, pageOf(stored).pagination);
   assert.deepEqual(result.map(p => p.status), [
     PRODUCT_STATUS.AVAILABLE, PRODUCT_STATUS.OUT_OF_STOCK, PRODUCT_STATUS.OUT_OF_STOCK,
   ]);

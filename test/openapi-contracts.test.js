@@ -1,3 +1,4 @@
+import { mockList, pageOf } from '../test-support/pagination.js';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import test from 'node:test';
@@ -110,13 +111,15 @@ test('se documentan exactamente las diecinueve operaciones existentes con métod
   for (const [path, methods] of Object.entries(document.paths)) {
     for (const operation of Object.values(methods)) {
       for (const parameter of operation.parameters ?? []) {
-        if (path.includes('{id}') || path.includes('{fileId}')) {
+        if (parameter.in === 'path') {
+          assert.ok(path.includes('{id}') || path.includes('{fileId}'));
           assert.equal(parameter.in, 'path');
           assert.equal(parameter.name, path.includes('{fileId}') ? 'fileId' : 'id');
           assert.equal(parameter.required, true);
         } else {
           assert.equal(parameter.in, 'query');
-          assert.equal(parameter.name, 'qty');
+          if (path.startsWith('/api/mocks/')) assert.equal(parameter.name, 'qty');
+          else assert.ok(['page', 'limit'].includes(parameter.name));
         }
       }
       assert.equal(operation.security, undefined);
@@ -126,9 +129,9 @@ test('se documentan exactamente las diecinueve operaciones existentes con métod
   }
 });
 
-test('los veinticuatro schemas existen y todos los $ref del documento se resuelven', () => {
+test('los veintinueve schemas existen y todos los $ref del documento se resuelven', () => {
   assert.deepEqual(Object.keys(document.components.schemas).sort(),
-    ['ObjectId', 'ProductCreate', 'Product', 'UserCreate', 'User', 'ErrorResponse', 'HealthResponse',
+    ['Pagination', 'ProductsPage', 'UsersPage', 'OrdersPage', 'UploadedFilesPage', 'ObjectId', 'ProductCreate', 'Product', 'UserCreate', 'User', 'ErrorResponse', 'HealthResponse',
       'Order', 'OrderCreate', 'Delivery', 'MockUser', 'MockCourier', 'MockOrder', 'MockDelivery',
       'MockUsersResponse', 'MockCouriersResponse', 'MockOrdersResponse', 'MockDeliveriesResponse',
       'SeedCounts', 'SeedRequest', 'SeedResponse', 'UploadedFile', 'UserDocumentUpload', 'OrderReceiptUpload'].sort());
@@ -205,7 +208,7 @@ test('ejemplos HTTP de Products, Users y Health respetan los schemas y cuerpos d
     await product.validate();
     return product;
   });
-  t.mock.method(Product, 'find', () => ({ lean: async () => product ? [product.toObject()] : [] }));
+  mockList(t.mock.method.bind(t.mock), Product, () => ({ lean: async () => product ? [product.toObject()] : [] }));
   t.mock.method(User, 'findOne', async () => null);
   t.mock.method(User.collection, 'createIndex', async () => 'email_1');
   t.mock.method(User.prototype, 'save', async function () {
@@ -214,7 +217,7 @@ test('ejemplos HTTP de Products, Users y Health respetan los schemas y cuerpos d
     user = this;
     return this;
   });
-  t.mock.method(User, 'find', async () => user ? [user] : []);
+  mockList(t.mock.method.bind(t.mock), User, async () => user ? [user] : []);
 
   for (const path of ['/api/products', '/api/users']) {
     const operation = document.paths[path].post;
@@ -449,7 +452,7 @@ test('Orders declara body, parámetro requerido y respuestas reutilizables exact
     assert.ok(operation.description.includes('INVALID_JSON'));
   }
   assert.deepEqual(collection.get.responses[200].content['application/json'].schema,
-    { type: 'array', items: { $ref: '#/components/schemas/Order' } });
+    { $ref: '#/components/schemas/OrdersPage' });
   assert.equal(collection.post.responses[201].content['application/json'].schema.$ref, '#/components/schemas/Order');
   assert.equal(detail.responses[200].content['application/json'].schema.$ref, '#/components/schemas/Order');
 });
@@ -492,7 +495,7 @@ test('ejemplos OpenAPI de Orders coinciden con respuestas HTTP y validación rea
     await order.validate();
     return order;
   });
-  t.mock.method(Order, 'find', async () => order ? [order] : []);
+  mockList(t.mock.method.bind(t.mock), Order, async () => order ? [order] : []);
   t.mock.method(Order, 'findById', async () => order ?? null);
   const media = collection.post.requestBody.content['application/json'];
   for (const { value } of Object.values(media.examples)) {
@@ -533,7 +536,7 @@ test('las cinco operaciones de archivos coinciden con el router real y sus pará
   assert.deepEqual(documented, actual);
   for (const path of filePaths) {
     for (const operation of Object.values(document.paths[path])) {
-      assert.deepEqual(operation.parameters.map(({ name, in: location, required, schema }) => ({ name, location, required, schema })),
+      assert.deepEqual(operation.parameters.filter(p => p.in === 'path').map(({ name, in: location, required, schema }) => ({ name, location, required, schema })),
         [{ name: 'id', location: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } }]);
       assert.ok(operation.description.includes('existencia'));
     }
@@ -579,10 +582,10 @@ test('UploadedFile representa los campos reales y sus ejemplos validan contra Mo
     await new UploadedFile(media.example).validate();
     assert.equal(new Date(media.example.uploadedAt).toISOString(), media.example.uploadedAt);
     const listed = operation.get.responses[200].content['application/json'];
-    assert.deepEqual(listed.schema, { type: 'array', items: { $ref: '#/components/schemas/UploadedFile' } });
+    assert.deepEqual(listed.schema, { $ref: '#/components/schemas/UploadedFilesPage' });
     assertMatches(listed.schema, listed.examples.populated.value);
-    assert.deepEqual(listed.examples.populated.value, [media.example]);
-    assert.deepEqual(listed.examples.empty.value, []);
+    assert.deepEqual(listed.examples.populated.value, pageOf([media.example]));
+    assert.deepEqual(listed.examples.empty.value, pageOf([]));
   }
 });
 
@@ -625,7 +628,7 @@ test('GET de metadatos respeta ejemplos documentados sin disco ni MongoDB', asyn
   t.mock.method(User, 'findById', () => ({ select: async () => ({ _id: 'existing' }) }));
   t.mock.method(Order, 'findById', async () => ({ _id: 'existing' }));
   t.mock.method(UploadedFile, 'create', () => { throw new Error('Escritura prohibida'); });
-  const find = t.mock.method(UploadedFile, 'find', async () => []);
+  const find = mockList(t.mock.method.bind(t.mock), UploadedFile, async () => []);
   for (const [index, path] of filePaths.entries()) {
     const operation = document.paths[path].get;
     const id = operation.parameters[0].example;
@@ -658,7 +661,7 @@ test('descarga OpenAPI documenta bytes, MIME, headers seguros y parámetro oblig
   const operation = document.paths['/api/files/{fileId}/download'].get;
   assert.equal(operation.operationId, 'downloadFile');
   assert.equal(operation.requestBody, undefined);
-  assert.deepEqual(operation.parameters.map(({ name, in: location, required, schema }) => ({ name, location, required, schema })),
+  assert.deepEqual(operation.parameters.filter(p => p.in === 'path').map(({ name, in: location, required, schema }) => ({ name, location, required, schema })),
     [{ name: 'fileId', location: 'path', required: true, schema: { $ref: '#/components/schemas/ObjectId' } }]);
   const response = operation.responses[200];
   assert.deepEqual(Object.keys(response.content), Object.values(FILE_MIME_TYPES));

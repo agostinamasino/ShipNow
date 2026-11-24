@@ -1,3 +1,4 @@
+import { paginationParameters, paginationMedia } from '../pagination.js';
 import { ORDER_STATUS, ORDER_PRIORITY } from '../../constants/index.js';
 
 const minimal = {
@@ -12,17 +13,12 @@ const parserDescription = 'Los errores del parser JSON también aplican si se en
 export default {
   '/api/orders': {
     get: {
+      parameters: paginationParameters,
       tags: ['Orders'], operationId: 'getOrders', summary: 'Listar pedidos',
       description: 'Devuelve un array, posiblemente vacío, sin garantizar orden. Las referencias se devuelven como IDs, sin populate. ' + parserDescription,
       responses: {
-        200: {
-          description: 'Array de pedidos; [] si no existen registros.',
-          content: { 'application/json': {
-            schema: { type: 'array', items: { $ref: '#/components/schemas/Order' } },
-            examples: { populated: { value: [example] }, empty: { value: [] } },
-          } },
-        },
-        400: { $ref: '#/components/responses/InvalidJson' },
+        200: { description: 'Página ordenada por _id ascendente; data puede estar vacío.', content: { 'application/json': paginationMedia('OrdersPage', example) } },
+        400: { $ref: '#/components/responses/ListBadRequest' },
         413: { $ref: '#/components/responses/PayloadTooLarge' },
         500: { $ref: '#/components/responses/InternalError' },
       },

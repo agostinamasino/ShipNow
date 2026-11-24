@@ -1,3 +1,4 @@
+import { mockList, pageOf } from '../test-support/pagination.js';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -48,9 +49,9 @@ test('Products registra creación y listado una vez, conservando documentos y si
   const events = capture(t);
   const doc = { name: sensitive, price: 1, status: PRODUCT_STATUS.AVAILABLE };
   t.mock.method(Product, 'create', async () => doc);
-  t.mock.method(Product, 'find', () => ({ lean: async () => [doc, doc] }));
+  mockList(t.mock.method.bind(t.mock), Product, () => ({ lean: async () => [doc, doc] }));
   assert.equal(await products.createProduct(doc), doc);
-  assert.deepEqual(await products.getProducts(), [doc, doc]);
+  assert.deepEqual(await products.getProducts(), pageOf([doc, doc]));
   assert.deepEqual(events, [
     { level: 'info', args: ['PRODUCT_CREATED'] },
     { level: 'debug', args: ['PRODUCTS_LISTED count=2'] },
@@ -63,9 +64,9 @@ test('Users registra creación y listado una vez sin incluir el correo ni el nom
   t.mock.method(User, 'findOne', async () => null);
   t.mock.method(User.collection, 'createIndex', async () => 'email_1');
   t.mock.method(User.prototype, 'save', async () => doc);
-  t.mock.method(User, 'find', async () => [doc]);
+  mockList(t.mock.method.bind(t.mock), User, async () => [doc]);
   assert.equal(await users.createUser(doc), doc);
-  assert.deepEqual(await users.getUsers(), [doc]);
+  assert.deepEqual(await users.getUsers(), pageOf([doc]));
   assert.deepEqual(events, [
     { level: 'info', args: ['USER_CREATED'] },
     { level: 'debug', args: ['USERS_LISTED count=1'] },
@@ -76,8 +77,8 @@ test('Products y Users no anuncian éxito ni registran errores en sus services s
   const events = capture(t);
   const failure = new Error(sensitive);
   t.mock.method(Product, 'create', async () => { throw failure; });
-  t.mock.method(Product, 'find', () => ({ lean: async () => { throw failure; } }));
-  t.mock.method(User, 'find', async () => { throw failure; });
+  mockList(t.mock.method.bind(t.mock), Product, () => ({ lean: async () => { throw failure; } }));
+  mockList(t.mock.method.bind(t.mock), User, async () => { throw failure; });
   t.mock.method(User.prototype, 'save', async () => { throw failure; });
   t.mock.method(User, 'findOne', async () => null);
   t.mock.method(User.collection, 'createIndex', async () => 'email_1');
@@ -94,7 +95,7 @@ test('Products y Users no anuncian éxito ni registran errores en sus services s
 
 test('un estado histórico inválido no anuncia un listado exitoso', async (t) => {
   const events = capture(t);
-  t.mock.method(Product, 'find', () => ({ lean: async () => [{ status: sensitive }] }));
+  mockList(t.mock.method.bind(t.mock), Product, () => ({ lean: async () => [{ status: sensitive }] }));
   await assert.rejects(products.getProducts());
   assert.deepEqual(events, []);
 });

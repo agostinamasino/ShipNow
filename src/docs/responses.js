@@ -19,11 +19,12 @@ function errorResponse(codes) {
 }
 
 export default {
+  ListBadRequest: errorResponse(['INVALID_PAGINATION', 'INVALID_JSON']),
   InvalidJson: errorResponse(['INVALID_JSON']),
   PayloadTooLarge: errorResponse(['PAYLOAD_TOO_LARGE']),
   InternalError: errorResponse(['INTERNAL_ERROR']),
   FileBadRequest: errorResponse(['FILE_REQUIRED', 'FILE_INVALID_FIELD', 'FILE_INVALID_DOCUMENT_TYPE', 'FILE_INVALID_ENTITY_ID', 'FILE_INVALID_REQUEST', 'INVALID_JSON']),
-  FileReadBadRequest: errorResponse(['FILE_INVALID_ENTITY_ID', 'INVALID_JSON']),
+  FileReadBadRequest: errorResponse(['INVALID_PAGINATION', 'FILE_INVALID_ENTITY_ID', 'INVALID_JSON']),
   FileTooLarge: errorResponse(['FILE_TOO_LARGE', 'PAYLOAD_TOO_LARGE']),
   FileInvalidType: errorResponse(['FILE_INVALID_TYPE']),
   FileEntityNotFound: errorResponse(['FILE_ENTITY_NOT_FOUND']),

@@ -180,7 +180,7 @@ describe('Infraestructura de uploads (sin endpoints productivos ni MongoDB)', ()
     const doc = new UploadedFile({ ...metadata, ownerModel: FILE_OWNERS.USER, ownerId: '507f1f77bcf86cd799439012' });
     await doc.validate();
     expect(UploadedFile.schema.path('ownerId').options.refPath).to.equal('ownerModel');
-    expect(UploadedFile.schema.indexes()[0][0]).to.deep.equal({ ownerModel: 1, ownerId: 1 });
+    expect(UploadedFile.schema.indexes()[0][0]).to.deep.equal({ ownerModel: 1, ownerId: 1, _id: 1 });
     expect(Object.keys(UploadedFile.schema.paths)).not.to.include('buffer');
     expect(doc.uploadedAt).to.be.instanceOf(Date);
     for (const patch of [{ ownerModel: 'Other' }, { ownerId: 'invalid' }, { size: -1 }, { size: 1.5 }, { size: UPLOAD_POLICY.maxSize + 1 }, { mimeType: 'text/plain' }, { mimeType: FILE_MIME_TYPES.PNG }, { path: '../escape' }, { documentType: DOCUMENT_TYPES.DELIVERY_PROOF }]) {

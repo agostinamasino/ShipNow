@@ -1,3 +1,4 @@
+import { mockList, pageOf } from '../test-support/pagination.js';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import test from 'node:test';
@@ -31,6 +32,7 @@ async function assertHttpError(response, code, details) {
 
 test('el catálogo congela el diccionario y cada definición pública', () => {
   const statuses = {
+    INVALID_PAGINATION: 400,
     INVALID_JSON: 400, PAYLOAD_TOO_LARGE: 413, ROUTE_NOT_FOUND: 404, PRODUCT_VALIDATION_FAILED: 400,
     PRODUCT_INVALID_STATUS: 400, USER_VALIDATION_FAILED: 400, USER_INVALID_ROLE: 400,
     USER_EMAIL_ALREADY_EXISTS: 409, MOCK_INVALID_QTY: 400, MOCK_INVALID_SEED_REQUEST: 400,
@@ -136,9 +138,9 @@ test('el servidor aplica el parser, 404 y middleware global, y conserva las ruta
 
   const product = { _id: '507f1f77bcf86cd799439011', name: 'Caja', price: 10, status: 'available' };
   const user = { _id: '507f1f77bcf86cd799439012', name: 'Ana', email: 'ana@example.com', role: 'user' };
-  t.mock.method(Product, 'find', () => ({ lean: async () => [product] }));
+  mockList(t.mock.method.bind(t.mock), Product, () => ({ lean: async () => [product] }));
   t.mock.method(Product, 'create', async () => product);
-  t.mock.method(User, 'find', async () => [user]);
+  mockList(t.mock.method.bind(t.mock), User, async () => [user]);
   t.mock.method(User, 'findOne', async () => null);
   t.mock.method(User.collection, 'createIndex', async () => 'email_1');
   t.mock.method(User.prototype, 'save', async () => user);
@@ -180,7 +182,7 @@ test('el servidor aplica el parser, 404 y middleware global, y conserva las ruta
   for (const [path, item] of [['/api/products', product], ['/api/users', user]]) {
     const list = await request(path);
     assert.equal(list.status, 200);
-    assert.deepEqual(await list.json(), [item]);
+    assert.deepEqual(await list.json(), pageOf([item]));
     const created = await request(path, JSON.stringify(item));
     assert.equal(created.status, 201);
     assert.deepEqual(await created.json(), item);

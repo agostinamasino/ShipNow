@@ -1,3 +1,4 @@
+import { mockList, pageOf } from '../../test-support/pagination.js';
 import { expect } from 'chai';
 import request from 'supertest';
 import mongoose from 'mongoose';
@@ -18,7 +19,7 @@ describe('Orders por HTTP con persistencia simulada', () => {
       status: ORDER_STATUS.PENDING, priority: ORDER_PRIORITY.NORMAL, __v: 0,
     };
     calls = { list: 0, order: [], users: [], selections: [], creates: [] };
-    doubles.replace(Order, 'find', async () => { calls.list++; return [new Order(fixture)]; });
+    mockList(doubles.replace.bind(doubles), Order, async () => { calls.list++; return [new Order(fixture)]; });
     doubles.replace(Order, 'findById', async id => { calls.order.push(id); return new Order(fixture); });
     doubles.replace(User, 'findById', id => {
       calls.users.push(id);
@@ -49,20 +50,20 @@ describe('Orders por HTTP con persistencia simulada', () => {
   }
 
   describe('GET /api/orders', () => {
-    it('200 con array de documentos y referencias como IDs, sin imponer orden', async () => {
+    it('200 con página de documentos y referencias como IDs, con orden ascendente por _id', async () => {
       const other = { ...fixture, _id: '507f1f77bcf86cd799439032', priority: ORDER_PRIORITY.HIGH };
-      doubles.replace(Order, 'find', async () => [new Order(other), new Order(fixture)]);
+      mockList(doubles.replace.bind(doubles), Order, async () => [new Order(other), new Order(fixture)]);
       const response = await request(app).get('/api/orders').expect(200).expect('Content-Type', /json/);
-      expect(response.body).to.be.an('array').with.lengthOf(2);
-      expect(response.body).to.have.deep.members([fixture, other]);
-      for (const order of response.body) expectOrder(order, order._id === fixture._id ? fixture : other);
+      expect(response.body.data).to.be.an('array').with.lengthOf(2);
+      expect(response.body.data).to.have.deep.members([fixture, other]);
+      for (const order of response.body.data) expectOrder(order, order._id === fixture._id ? fixture : other);
     });
     it('200 con array vacío', async () => {
-      doubles.replace(Order, 'find', async () => []);
-      expect((await request(app).get('/api/orders').expect(200)).body).to.deep.equal([]);
+      mockList(doubles.replace.bind(doubles), Order, async () => []);
+      expect((await request(app).get('/api/orders').expect(200)).body).to.deep.equal(pageOf([]));
     });
     it('500 seguro ante fallo de listado', async () => {
-      doubles.replace(Order, 'find', async () => { throw new Error(secret); });
+      mockList(doubles.replace.bind(doubles), Order, async () => { throw new Error(secret); });
       expectError(await request(app).get('/api/orders'), 'INTERNAL_ERROR');
     });
   });

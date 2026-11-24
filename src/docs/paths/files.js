@@ -1,3 +1,4 @@
+import { paginationParameters, paginationMedia } from '../pagination.js';
 import { DOCUMENT_TYPES, FILE_OWNERS, FILE_MIME_TYPES } from '../../constants/index.js';
 
 function operations({ ownerModel, ownerId, schema, documentType, prefix, tag }) {
@@ -36,12 +37,9 @@ function operations({ ownerModel, ownerId, schema, documentType, prefix, tag }) 
       tags: [tag], operationId: ownerModel === FILE_OWNERS.USER ? 'getUserDocuments' : 'getOrderReceipts',
       summary: ownerModel === FILE_OWNERS.USER ? 'Consultar metadatos de documentos de usuario' : 'Consultar metadatos de comprobantes de pedido',
       description: 'Valida ID y existencia. Filtra por ownerModel y ownerId; no mezcla entidades. Devuelve metadatos, sin contenido binario ni enlaces públicos. No hay garantía de orden; una entidad existente sin archivos devuelve []. Una entidad inexistente devuelve 404. ' + globalErrors,
-      parameters,
+      parameters: [...parameters, ...paginationParameters],
       responses: {
-        200: { description: 'Array de metadatos asociados, posiblemente vacío.', content: { 'application/json': {
-          schema: { type: 'array', items: { $ref: '#/components/schemas/UploadedFile' } },
-          examples: { populated: { value: [example] }, empty: { value: [] } },
-        } } },
+        200: { description: 'Página de metadatos asociados, posiblemente vacía.', content: { 'application/json': paginationMedia('UploadedFilesPage', example) } },
         400: { $ref: '#/components/responses/FileReadBadRequest' },
         404: { $ref: '#/components/responses/FileEntityNotFound' },
         413: { $ref: '#/components/responses/PayloadTooLarge' },

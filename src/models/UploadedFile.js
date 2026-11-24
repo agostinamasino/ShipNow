@@ -31,6 +31,6 @@ uploadedFileSchema.pre('validate', function () {
   if (extension && !this.filename?.endsWith(extension)) this.invalidate('filename', 'Formato de archivo incompatible.');
 });
 
-uploadedFileSchema.index({ ownerModel: 1, ownerId: 1 });
+uploadedFileSchema.index({ ownerModel: 1, ownerId: 1, _id: 1 });
 
 export default mongoose.model('UploadedFile', uploadedFileSchema);

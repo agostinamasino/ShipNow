@@ -150,11 +150,11 @@ Para POST, elegir Body → raw → JSON y `Content-Type: application/json`.
 | Método | Ruta | Resultado |
 | --- | --- | --- |
 | GET | `/health` | 200, `{"status":"ok"}` |
-| GET | `/api/products` | 200, array de productos |
+| GET | `/api/products` | 200, página de productos |
 | POST | `/api/products` | 201, producto guardado |
-| GET | `/api/users` | 200, array de usuarios |
+| GET | `/api/users` | 200, página de usuarios |
 | POST | `/api/users` | 201, usuario guardado |
-| GET | `/api/orders` | 200, array de pedidos, posiblemente vacío |
+| GET | `/api/orders` | 200, página de pedidos, posiblemente vacía |
 | POST | `/api/orders` | 201, pedido guardado |
 | GET | `/api/orders/:id` | 200, pedido encontrado |
 
@@ -229,8 +229,8 @@ Respuesta HTTP 201 ilustrativa:
 }
 ```
 
-`GET /api/orders` devuelve un array sin orden garantizado; si no hay registros,
-devuelve `[]`. `GET /api/orders/:id` devuelve un documento. Las referencias se
+`GET /api/orders` devuelve una página ordenada por `_id` ascendente; si no hay
+registros, devuelve `data: []` y `pagination.totalPages: 0`. `GET /api/orders/:id` devuelve un documento. Las referencias se
 representan como IDs, sin expandir los datos personales del usuario.
 
 Los datos inválidos devuelven 400; un usuario referenciado inexistente o un pedido
@@ -264,6 +264,84 @@ curl -i "$base/api/orders"
 orderId='507f1f77bcf86cd799439031'
 curl -i "$base/api/orders/$orderId"
 ```
+
+## Paginación de listados — Módulo 8
+
+Los cinco GET `/api/products`, `/api/users`, `/api/orders`,
+`/api/users/:id/documents` y `/api/orders/:id/receipts` ahora devuelven
+`{ data, pagination }`. Es un cambio autorizado respecto de los arrays directos
+usados en módulos anteriores: los consumidores deben leer `respuesta.data`.
+Los POST, la consulta individual de Orders, la descarga y los mocks conservan
+sus contratos. Los GET de mocks siguen usando `qty`, sin paginación de MongoDB.
+
+| Parámetro | Predeterminado | Restricción |
+| --- | --- | --- |
+| `page` | 1 | Entero positivo y seguro. Máximo absoluto 10001, sujeto al desplazamiento. |
+| `limit` | 10 | Entero positivo entre 1 y 100. |
+| Desplazamiento calculado | 0 | `(page - 1) * limit` no mayor a 10000. |
+
+Se rechazan valores vacíos, negativos, cero, decimales, texto, notación
+exponencial, espacios, parámetros repetidos, arrays, objetos y números inseguros.
+Las reglas están centralizadas en `src/utils/pagination.js`. El error público
+es HTTP 400 `INVALID_PAGINATION`, sin copiar los parámetros recibidos.
+
+Ejemplo para `GET /api/products?page=1&limit=2` con un único producto:
+
+```json
+{
+  "data": [
+    { "_id": "507f1f77bcf86cd799439011", "name": "Caja", "description": "", "price": 1500, "stock": 20, "status": "available", "__v": 0 }
+  ],
+  "pagination": { "page": 1, "limit": 2, "total": 1, "totalPages": 1 }
+}
+```
+
+Una colección vacía devuelve HTTP 200 con
+`{"data":[],"pagination":{"page":1,"limit":10,"total":0,"totalPages":0}}`.
+Una página válida más allá del último registro también devuelve `data: []`,
+conservando el total y la página solicitada. Para documentos/comprobantes se
+comprueba primero la entidad: si no existe continúa devolviendo HTTP 404
+`FILE_ENTITY_NOT_FOUND`.
+
+```powershell
+$base = 'http://localhost:3000'
+Invoke-RestMethod "$base/api/products?page=2&limit=5"
+curl.exe -i "$base/api/users?page=1&limit=10"
+curl.exe -i "$base/api/orders?page=2&limit=10"
+# Sustituir por IDs de entidades existentes:
+curl.exe -i "$base/api/users/$userId/documents?page=1&limit=5"
+curl.exe -i "$base/api/orders/$orderId/receipts?page=1&limit=5"
+# HTTP 400 INVALID_PAGINATION:
+curl.exe -i "$base/api/products?limit=101"
+```
+
+En Linux/macOS los mismos ejemplos funcionan con `curl` en lugar de `curl.exe`.
+Los repositories ejecutan `find(filter).sort({ _id: 1 }).skip(skip).limit(limit)`
+y `countDocuments(filter)`, sin traer toda la colección para recortarla en
+JavaScript. En archivos ambas consultas usan `ownerModel` y `ownerId`; el índice
+declarado se amplía a `{ ownerModel: 1, ownerId: 1, _id: 1 }`, que también cubre
+las búsquedas por su prefijo. Esta etapa no ejecuta migraciones ni elimina
+índices en Atlas. Un índice anterior ya instalado puede seguir existiendo hasta
+una revisión administrativa; no se usa `syncIndexes()` automáticamente.
+
+Products mantiene `lean()` y normaliza solo los estados de la página. Users y
+Orders conservan la hidratación Mongoose para evitar cambios adicionales en
+campos, defaults o serialización. El orden por `_id` es estable con datos sin
+cambios, pero las inserciones/eliminaciones entre solicitudes pueden desplazar
+resultados. `skip` sigue teniendo costo creciente: el tope de 10000 es una
+medida preventiva, no un benchmark. El conteo exacto también tiene costo; las
+dos consultas no constituyen un snapshot transaccional. Para volúmenes mayores
+convendría evaluar paginación por cursor en otra etapa.
+
+Se conservan JSON de 100 KB, archivos de 5 MiB, un archivo/un campo/dos partes
+multipart, validación MIME/extensión/firma y descarga por bloques. No se agregan
+lecturas completas de archivos, consultas por cada registro ni logs por documento.
+
+Verificación de esta etapa: **565 pruebas aprobadas**, 176 de regresión y 389
+funcionales. Se incorporan 18 pruebas de regresión y 159 funcionales (177 nuevas),
+y se adaptan los contratos anteriores conservando las comprobaciones de contenido.
+Las suites individuales y dos ejecuciones completas consecutivas se verifican
+sin Atlas, seed real ni archivos residuales en las carpetas del proyecto.
 
 ## Constantes y compatibilidad de estados
 
@@ -456,6 +534,7 @@ incluyen `error.details.fields` con nombres de campos permitidos.
 
 | Código | HTTP | Situación |
 | --- | --- | --- |
+| `INVALID_PAGINATION` | 400 | page/limit inválidos o desplazamiento mayor a 10000 en los cinco listados paginados. |
 | `INVALID_JSON` | 400 | El parser rechaza el cuerpo como JSON. |
 | `PAYLOAD_TOO_LARGE` | 413 | El cuerpo JSON supera el límite de 100 KB de `express.json()`. |
 | `ROUTE_NOT_FOUND` | 404 | Ninguna ruta responde al método y la URL solicitados. |
@@ -791,7 +870,7 @@ curl -i "$base/api/mocks/deliveries?qty=1"
 
 ### Alcance documentado
 
-La especificación contiene **19 operaciones** y **24 schemas reutilizables**.
+La especificación contiene **19 operaciones** y **29 schemas reutilizables**.
 
 | Tag | Operaciones o representación |
 | --- | --- |
@@ -1025,15 +1104,15 @@ User, Order y Delivery conservan sus contratos. No se modifican estados.
 | Método y ruta | Entrada y respuesta |
 | --- | --- |
 | POST `/api/users/:id/documents` | Multipart con `file` y `documentType`; HTTP 201 con metadatos. |
-| GET `/api/users/:id/documents` | HTTP 200 con array de metadatos de ese usuario. |
+| GET `/api/users/:id/documents` | HTTP 200 con página de metadatos de ese usuario. |
 | POST `/api/orders/:id/receipts` | Multipart con `file` y `documentType`; HTTP 201 con metadatos. |
-| GET `/api/orders/:id/receipts` | HTTP 200 con array de metadatos de ese pedido. |
+| GET `/api/orders/:id/receipts` | HTTP 200 con página de metadatos de ese pedido. |
 | GET `/api/files/:fileId/download` | HTTP 200 con el contenido binario del archivo asociado. |
 
 El parámetro `id` debe ser un ObjectId hexadecimal de 24 caracteres de una entidad
 existente. Se comprueba antes de iniciar la escritura. Un ID inválido devuelve 400
 `FILE_INVALID_ENTITY_ID`; una entidad inexistente, 404 `FILE_ENTITY_NOT_FOUND`.
-Una entidad existente sin archivos devuelve 200 y `[]`. Las referencias se derivan
+Una entidad existente sin archivos devuelve 200 con `data: []` y `pagination.totalPages: 0`. Las referencias se derivan
 de la ruta: no se aceptan `ownerModel` ni `ownerId` en el body.
 
 ### Multipart y límites
@@ -1070,8 +1149,8 @@ crean usuarios ni pedidos. Si no existen, preparalos con los endpoints respectiv
 
 ```powershell
 $base = 'http://localhost:3000'
-$usuarios = @(Invoke-RestMethod -Uri "$base/api/users")
-$pedidos = @(Invoke-RestMethod -Uri "$base/api/orders")
+$usuarios = @((Invoke-RestMethod -Uri "$base/api/users").data)
+$pedidos = @((Invoke-RestMethod -Uri "$base/api/orders").data)
 if ($usuarios.Count -eq 0 -or $pedidos.Count -eq 0) { throw 'Se necesitan un usuario y un pedido existentes en la base de prueba' }
 $userId = $usuarios[0]._id
 $orderId = $pedidos[0]._id
@@ -1107,7 +1186,8 @@ en tu base y no deben copiarse como entradas reales:
 }
 ```
 
-El GET devuelve un array de esos objetos, sin orden garantizado. Filtra por
+El GET devuelve esos objetos dentro de `data`, con metadata `pagination` y orden
+ascendente por `_id`. Filtra por
 `ownerModel` y `ownerId` y no devuelve archivos de otras entidades. Los comprobantes
 de pedido usan `ownerModel: "Order"` y `documentType: "delivery_proof"`.
 
@@ -1154,7 +1234,7 @@ Winston registra `FILE_UPLOAD_COMPLETED` en info solo tras confirmar la asociaci
 Swagger en `/api/docs` documenta las cuatro operaciones con multipart, schemas
 `UserDocumentUpload`, `OrderReceiptUpload` y `UploadedFile`, y ejemplos de los diez
 errores de carga. También documenta la descarga binaria. El total actual es
-**19 operaciones y 24 schemas**.
+**19 operaciones y 29 schemas**.
 
 ```sh
 npm run test:regression
@@ -1199,7 +1279,7 @@ Ejemplo PowerShell, continuando con `$base` y `$userId` obtenidos de entidades
 existentes en los ejemplos anteriores:
 
 ```powershell
-$documentos = @(Invoke-RestMethod -Uri "$base/api/users/$userId/documents")
+$documentos = @((Invoke-RestMethod -Uri "$base/api/users/$userId/documents").data)
 if ($documentos.Count -eq 0) { throw 'El usuario no tiene archivos asociados' }
 $fileId = $documentos[0]._id
 # Elegir un destino local; la extensión real puede ser pdf, jpg o png.

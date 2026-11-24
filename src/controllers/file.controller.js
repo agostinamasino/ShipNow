@@ -16,7 +16,7 @@ export function createFileController(storage) {
       return res.status(201).json(file);
     },
     async list(req, res) {
-      const files = await fileService.getFiles(res.locals.fileOwner);
+      const files = await fileService.getFiles(res.locals.fileOwner, req.query);
       return res.json(files);
     },
     async download(req, res, next) {

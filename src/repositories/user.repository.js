@@ -14,8 +14,13 @@ function ensureEmailIndex() {
   return emailIndexPromise;
 }
 
-export function findAll() {
-  return User.find();
+export async function findAll({ skip, limit }) {
+  const filter = {};
+  const [data, total] = await Promise.all([
+    User.find(filter).sort({ _id: 1 }).skip(skip).limit(limit),
+    User.countDocuments(filter),
+  ]);
+  return { data, total };
 }
 
 export function findByEmail(email) {

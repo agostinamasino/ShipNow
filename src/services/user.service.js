@@ -1,12 +1,14 @@
+import { parsePagination, paginated } from '../utils/pagination.js';
 import * as userRepository from '../repositories/user.repository.js';
 import { USER_ROLES } from '../constants/index.js';
 import { AppError } from '../errors/app-error.js';
 import logger from '../config/logger.js';
 
-export async function getUsers() {
-  const users = await userRepository.findAll();
+export async function getUsers(query) {
+  const options = parsePagination(query);
+  const { data: users, total } = await userRepository.findAll(options);
   logger.debug(`USERS_LISTED count=${users.length}`);
-  return users;
+  return paginated(users, total, options);
 }
 
 export async function createUser(data) {

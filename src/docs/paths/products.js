@@ -1,3 +1,4 @@
+import { paginationParameters, paginationMedia } from '../pagination.js';
 import { PRODUCT_STATUS } from '../../constants/index.js';
 
 const example = {
@@ -8,19 +9,14 @@ const example = {
 export default {
   '/api/products': {
     get: {
+      parameters: paginationParameters,
       tags: ['Products'],
       operationId: 'getProducts',
       summary: 'Listar productos',
       description: 'Lee MongoDB. Convierte estados booleanos históricos a String en memoria. Un estado histórico desconocido devuelve INTERNAL_ERROR. Los errores del parser aplican si se envía un cuerpo JSON.',
       responses: {
-        200: {
-          description: 'Array de productos, posiblemente vacío.',
-          content: { 'application/json': {
-            schema: { type: 'array', items: { $ref: '#/components/schemas/Product' } },
-            example: [example],
-          } },
-        },
-        400: { $ref: '#/components/responses/InvalidJson' },
+        200: { description: 'Página ordenada por _id ascendente; data puede estar vacío.', content: { 'application/json': paginationMedia('ProductsPage', example) } },
+        400: { $ref: '#/components/responses/ListBadRequest' },
         413: { $ref: '#/components/responses/PayloadTooLarge' },
         500: { $ref: '#/components/responses/InternalError' },
       },

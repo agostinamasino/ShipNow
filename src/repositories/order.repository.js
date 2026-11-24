@@ -1,8 +1,13 @@
 import Order from '../models/Order.js';
 import User from '../models/User.js';
 
-export function findAll() {
-  return Order.find();
+export async function findAll({ skip, limit }) {
+  const filter = {};
+  const [data, total] = await Promise.all([
+    Order.find(filter).sort({ _id: 1 }).skip(skip).limit(limit),
+    Order.countDocuments(filter),
+  ]);
+  return { data, total };
 }
 
 export function findById(id) {

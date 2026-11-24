@@ -1,3 +1,4 @@
+import { parsePagination, paginated } from '../utils/pagination.js';
 import * as userRepository from '../repositories/user.repository.js';
 import * as orderRepository from '../repositories/order.repository.js';
 import * as fileRepository from '../repositories/file.repository.js';
@@ -57,10 +58,11 @@ export async function createFile(storage, owner, body, file) {
   return result;
 }
 
-export async function getFiles(owner) {
-  const files = await fileRepository.findByOwner(owner);
+export async function getFiles(owner, query) {
+  const options = parsePagination(query);
+  const { data: files, total } = await fileRepository.findByOwner(owner, options);
   logger.debug(`FILES_LISTED entity=${owner.ownerModel} count=${files.length}`);
-  return files;
+  return paginated(files, total, options);
 }
 
 export async function getDownload(storage, id) {

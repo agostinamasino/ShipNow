@@ -1,3 +1,4 @@
+import { mockList } from '../test-support/pagination.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
@@ -155,7 +156,7 @@ test('un 500 conserva diagnóstico privado y un solo evento, sin modificar ni fi
   const { instance, flush } = await isolated(t);
   const error = new Error('Fallo de almacenamiento controlado password=FAKE_PASSWORD');
   const failures = [], summaries = [];
-  t.mock.method(Product, 'find', () => ({ lean: async () => { throw error; } }));
+  mockList(t.mock.method.bind(t.mock), Product, () => ({ lean: async () => { throw error; } }));
   t.mock.method(logger, 'error', (event, metadata) => { failures.push(event); instance.error(event, metadata); });
   t.mock.method(logger, 'http', event => summaries.push(event));
   const response = await request(app).get('/api/products').expect(500);

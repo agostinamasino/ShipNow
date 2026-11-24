@@ -1,3 +1,4 @@
+import { paginationParameters, paginationMedia } from '../pagination.js';
 import { USER_ROLES } from '../../constants/index.js';
 
 const example = {
@@ -8,18 +9,14 @@ const example = {
 export default {
   '/api/users': {
     get: {
+      parameters: paginationParameters,
       tags: ['Users'],
       operationId: 'getUsers',
       summary: 'Listar usuarios',
-      description: 'Devuelve los usuarios guardados en MongoDB. Los errores del parser aplican si se envía un cuerpo JSON.',
+      description: 'Devuelve una página de usuarios guardados en MongoDB. Los errores del parser aplican si se envía un cuerpo JSON.',
       responses: {
-        200: {
-          description: 'Array de usuarios, posiblemente vacío.',
-          content: { 'application/json': {
-            schema: { type: 'array', items: { $ref: '#/components/schemas/User' } }, example: [example],
-          } },
-        },
-        400: { $ref: '#/components/responses/InvalidJson' },
+        200: { description: 'Página ordenada por _id ascendente; data puede estar vacío.', content: { 'application/json': paginationMedia('UsersPage', example) } },
+        400: { $ref: '#/components/responses/ListBadRequest' },
         413: { $ref: '#/components/responses/PayloadTooLarge' },
         500: { $ref: '#/components/responses/InternalError' },
       },

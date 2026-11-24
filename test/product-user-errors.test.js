@@ -1,3 +1,4 @@
+import { mockList } from '../test-support/pagination.js';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
@@ -78,7 +79,7 @@ test('Products devuelve 400 para un estado inválido enviado en POST', async () 
 });
 
 test('Products devuelve 500 para un estado histórico inválido al listar', async (t) => {
-  t.mock.method(Product, 'find', () => ({ lean: async () => [{ ...product, status: marker }] }));
+  mockList(t.mock.method.bind(t.mock), Product, () => ({ lean: async () => [{ ...product, status: marker }] }));
   await assertError(await request('products'), 'INTERNAL_ERROR');
 });
 
@@ -90,7 +91,7 @@ test('Products propaga errores de escritura intactos y responde 500 seguro', asy
 });
 
 test('Products devuelve 500 seguro ante un fallo de lectura', async (t) => {
-  t.mock.method(Product, 'find', () => { throw new Error(marker); });
+  mockList(t.mock.method.bind(t.mock), Product, () => { throw new Error(marker); });
   await assertError(await request('products'), 'INTERNAL_ERROR');
 });
 

@@ -1,7 +1,7 @@
 import * as orderService from '../services/order.service.js';
 
 export async function getOrders(req, res) {
-  const orders = await orderService.getOrders();
+  const orders = await orderService.getOrders(req.query);
   return res.json(orders);
 }
 

@@ -1,7 +1,7 @@
 import * as userService from '../services/user.service.js';
 
 export async function getUsers(req, res) {
-  const users = await userService.getUsers();
+  const users = await userService.getUsers(req.query);
   return res.json(users);
 }
 

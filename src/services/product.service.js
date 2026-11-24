@@ -1,3 +1,4 @@
+import { parsePagination, paginated } from '../utils/pagination.js';
 import * as productRepository from '../repositories/product.repository.js';
 import { PRODUCT_STATUS } from '../constants/index.js';
 import { AppError } from '../errors/app-error.js';
@@ -12,8 +13,9 @@ export function normalizeProductStatus(status) {
   return status;
 }
 
-export async function getProducts() {
-  const products = await productRepository.findAll();
+export async function getProducts(query) {
+  const options = parsePagination(query);
+  const { data: products, total } = await productRepository.findAll(options);
   const result = products.map(product => {
     try {
       return { ...product, status: normalizeProductStatus(product.status) };
@@ -25,7 +27,7 @@ export async function getProducts() {
     }
   });
   logger.debug(`PRODUCTS_LISTED count=${result.length}`);
-  return result;
+  return paginated(result, total, options);
 }
 
 export async function createProduct(data) {

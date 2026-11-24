@@ -1,3 +1,4 @@
+import { mockList, pageOf } from '../../test-support/pagination.js';
 import { expect } from 'chai';
 import request from 'supertest';
 import app from '../../src/app.js';
@@ -18,12 +19,12 @@ describe('Users por HTTP con persistencia simulada', () => {
 
   it('GET 200 devuelve el array controlado con campos reales', async () => {
     const users = [{ _id: id, name: 'Usuario de prueba', email: 'user@example.com', role: USER_ROLES.USER, __v: 0 }];
-    doubles.replace(User, 'find', async () => users);
+    mockList(doubles.replace.bind(doubles), User, async () => users);
     const response = await request(app).get('/api/users').expect(200);
-    expect(response.body).to.deep.equal(users);
+    expect(response.body).to.deep.equal(pageOf(users));
   });
   it('GET ante fallo de lectura devuelve 500 seguro', async () => {
-    doubles.replace(User, 'find', async () => { throw new Error(secret); });
+    mockList(doubles.replace.bind(doubles), User, async () => { throw new Error(secret); });
     expectError(await request(app).get('/api/users'), 'INTERNAL_ERROR');
   });
   it('POST 201 normaliza email y conserva defaults y campos', async () => {

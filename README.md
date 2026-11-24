@@ -8,6 +8,61 @@ Estado de entrega del Módulo 8: **604 pruebas locales** (212 de regresión y 39
 funcionales), **16 verificaciones Docker reales** aprobadas en la Etapa 5,
 **19 operaciones HTTP** y **30 schemas OpenAPI**. La auditoría final modifica
 solo documentación y no repite ni sustituye la integración Docker aprobada.
+## Índice
+
+- [Descripción del proyecto](#shipnow)
+- [Inicio rápido para el evaluador](#inicio-rápido-para-el-evaluador)
+- [Arquitectura por capas](#arquitectura-por-capas)
+- [Estructura actual](#estructura-actual)
+- [Instalación desde un clon limpio](#instalación-desde-un-clon-limpio-powershell)
+- [Ejecución local](#ejecutar)
+- [Configuración y política de endpoints por entorno](#configuración-productiva-health-y-endpoints-internos--módulo-8)
+- [Endpoints principales](#probar-con-postman-o-thunder-client) y [Orders](#pedidos-orders)
+- [Paginación y límites](#paginación-de-listados--módulo-8)
+- [Mocks](#vistas-previas-de-mocks) y [seed](#cargar-un-lote-de-prueba)
+- [Manejo de errores](#respuestas-de-error)
+- [Logging y diagnósticos privados](#logging-y-monitoreo-básico)
+- [Carga de archivos](#módulo-7--documentos-y-comprobantes) y [descarga controlada](#descarga-controlada)
+- [Swagger/OpenAPI](#módulo-5--documentación-interactiva-con-swaggeropenapi)
+- [Pruebas automatizadas](#módulo-6--testing-funcional)
+- [Docker](#docker--construcción-ejecución-y-verificación) y [verificador independiente](#integración-docker-separada-de-npm-test)
+- [Auditoría y limitaciones](#auditoría-final-y-limitaciones-del-alcance)
+
+## Inicio rápido para el evaluador
+
+Requiere **Node >=22.21.0** y npm (verificado con **11.6.2**). Para las pruebas
+locales no se necesita MongoDB, Atlas, Docker ni un archivo `.env`:
+
+```sh
+git clone https://github.com/agostinamasino/ShipNow.git
+cd ShipNow
+node --version
+npm --version
+npm ci --include=dev
+npm test
+```
+
+Resultado verificado: **604 pruebas automatizadas** (212 de regresión y 392
+funcionales). Mocha, Chai y Supertest se instalan como devDependencies; no usar
+una instalación exclusivamente productiva para ejecutar estas suites.
+
+Para ejecutar la API **con persistencia real**, copiar `.env.example` a `.env`
+solo si no existe, configurar un MongoDB propio y ejecutar `npm run dev` o
+`npm start`; consultar [Ejecutar](#ejecutar) e
+[instalación detallada](#instalación-desde-un-clon-limpio-powershell).
+La configuración productiva exige conexión inicial exitosa; development permite
+disponibilidad parcial. Abrir `http://localhost:3000/health` y
+`http://localhost:3000/api/docs/` (ajustar PORT).
+
+Para Docker: `docker build -t shipnow:m8 .` y seguir el
+[ejemplo completo con MongoDB aislado](#ejemplo-docker-completo-con-mongodb-local-aislado).
+Incluye red, variables externas, volúmenes y espera de health antes de consultar
+Swagger. Después, `node docker-tests/verify.mjs` ejecuta **16 verificaciones reales**
+independientes de `npm test`. El catálogo contiene **19 operaciones y 30 schemas**.
+Las instrucciones detalladas conservan alternativas PowerShell y Linux/macOS.
+
+## Arquitectura por capas
+
 Products, Users, Orders y mocks siguen la arquitectura por capas.
 
 | Capa | Responsabilidad |
@@ -283,8 +338,10 @@ docker run -d --init --name shipnow-api `
   --mount type=volume,source=shipnow-uploads,target=/app/uploads `
   --mount type=volume,source=shipnow-logs,target=/app/logs `
   shipnow:m8
-curl.exe -i http://localhost:3000/health
-curl.exe -L http://localhost:3000/api/docs/
+$healthStatus = curl.exe --silent --show-error --retry 10 --retry-all-errors --retry-delay 1 --connect-timeout 2 --max-time 5 --retry-max-time 30 --fail --output NUL --write-out '%{http_code}' http://localhost:3000/health
+if ($LASTEXITCODE -ne 0 -or $healthStatus -ne '200') { throw 'La API no alcanzó HTTP 200 en /health dentro de la espera acotada' }
+Write-Output "Health HTTP $healthStatus"
+curl.exe --fail -L http://localhost:3000/api/docs/
 docker inspect shipnow-api --format '{{.State.Health.Status}}'
 docker stop --timeout 15 shipnow-api
 ```
@@ -340,9 +397,20 @@ docker run -d --init --name shipnow-demo-api --network shipnow-demo-net `
   --mount type=volume,source=shipnow-demo-logs,target=/app/logs shipnow:m8
 # Esperar el arranque; estos comandos no insertan documentos.
 docker logs shipnow-demo-api
-curl.exe --retry 10 --retry-connrefused --retry-delay 1 --fail http://localhost:3000/health
+$healthStatus = curl.exe --silent --show-error --retry 10 --retry-all-errors --retry-delay 1 --connect-timeout 2 --max-time 5 --retry-max-time 30 --fail --output NUL --write-out '%{http_code}' http://localhost:3000/health
+if ($LASTEXITCODE -ne 0 -or $healthStatus -ne '200') { throw 'La API no alcanzó HTTP 200 en /health dentro de la espera acotada' }
+Write-Output "Health HTTP $healthStatus"
 curl.exe --fail -L http://localhost:3000/api/docs/
 ```
+
+La espera usa curl >=7.71.0 y `--retry-all-errors` para cubrir conexiones rechazadas
+y respuestas vacías como `curl: (52)` durante el inicio. Hay hasta 10 reintentos,
+2 segundos para conectar y 5 segundos por intento; el presupuesto de reintentos
+es de 30 segundos (el último intento puede consumir hasta 5 segundos adicionales).
+`--fail` rechaza errores HTTP y el bloque exige exactamente HTTP 200 en `/health`
+antes de consultar Swagger. No es una espera indefinida ni sustituye la conexión
+inicial de MongoDB. `NUL` descarta el body en Windows; `/dev/null` en Linux/macOS.
+Estos reintentos se aplican a GET de health, no a POST con efectos persistentes.
 
 Los comandos Docker de creación anteriores funcionan también en Linux/macOS.
 Reemplazar el bucle de espera y el comando de API por:
@@ -355,7 +423,9 @@ until docker exec shipnow-demo-mongo mongosh --quiet --eval 'quit(db.adminComman
   sleep 1
 done
 docker run -d --init --name shipnow-demo-api --network shipnow-demo-net --env NODE_ENV=production --env PORT=3000 --env LOG_LEVEL=info --env 'MONGODB_URI=mongodb://shipnow-demo-mongo:27017/shipnow_demo_test' --publish 127.0.0.1:3000:3000 --mount type=volume,source=shipnow-demo-uploads,target=/app/uploads --mount type=volume,source=shipnow-demo-logs,target=/app/logs shipnow:m8
-curl --retry 10 --retry-connrefused --retry-delay 1 --fail http://localhost:3000/health
+health_status=$(curl --silent --show-error --retry 10 --retry-all-errors --retry-delay 1 --connect-timeout 2 --max-time 5 --retry-max-time 30 --fail --output /dev/null --write-out '%{http_code}' http://localhost:3000/health)
+if [ "$?" -ne 0 ] || [ "$health_status" != '200' ]; then echo 'La API no alcanzó HTTP 200 en /health'; exit 1; fi
+printf 'Health HTTP %s\n' "$health_status"
 curl --fail -L http://localhost:3000/api/docs/
 ```
 
@@ -407,6 +477,25 @@ Con la imagen construida y Docker disponible, ejecutar explícitamente:
 node docker-tests/verify.mjs
 ```
 
+Para seleccionar otra etiqueta ya construida:
+
+```powershell
+docker build -t shipnow:evaluacion .
+node docker-tests/verify.mjs --image shipnow:evaluacion
+# Compatible con el argumento anterior de ruta al ejecutable:
+node docker-tests/verify.mjs 'C:\ruta\Docker\docker.exe' --image shipnow:evaluacion
+node docker-tests/verify.mjs --help
+```
+
+La opción `--image` se admite una sola vez. Por defecto se conserva `shipnow:m8`.
+Se valida un nombre/tag Docker de hasta 255 caracteres (con registry/puerto
+opcionales), sin espacios, credenciales, opciones adicionales ni digest. Los
+comandos usan argumentos separados y no se ejecutan mediante un shell.
+El verificador informa la imagen seleccionada y **no elimina ninguna imagen**;
+solo limpia sus contenedores, red, volúmenes y archivos temporales. Ejecutar las
+modalidades secuencialmente porque comparten nombres de recursos temporales.
+Los comandos de build y del verificador son iguales en Linux/macOS.
+
 Si Docker no está en el PATH de la terminal, el script admite su ruta como
 segundo argumento, por ejemplo el ejecutable de la instalación Docker Desktop.
 El verificador no lee `.env`, no usa Atlas ni la base `shipnow`, y rechaza nombres
@@ -426,7 +515,7 @@ comprobó conexión inicial antes de escuchar y cierre con código 0. El evento
 verificar el volumen, sin habilitar logger-test en producción.
 
 La limpieza elimina solo los contenedores, red, volúmenes y archivo temporal
-creados por el verificador; conserva `shipnow:m8` y las imágenes base descargadas.
+creados por el verificador; conserva la imagen seleccionada y las imágenes base descargadas.
 No utiliza comandos prune. Esta prueba es destructiva únicamente para su propia
 base y volúmenes ficticios: no reutilizar esos nombres para datos importantes.
 Se necesita Docker activo y acceso para descargar imágenes si no están en caché.
@@ -1704,9 +1793,13 @@ lockfile entregado, sin instalar ni actualizar paquetes:
 
 Los avisos de [glob](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4) y
 [minimatch](https://github.com/advisories/GHSA-g3hv-75wg-m249) afectan la cadena de
-Mocha. Estas herramientas no están instaladas en la imagen productiva. Queda
-pendiente evaluar una actualización compatible de testing en una tarea separada;
-no se aplican cambios mayores automáticos ni `npm audit fix --force`.
+Mocha: son tres paquetes marcados y **dos avisos de seguridad subyacentes**.
+Estas herramientas no están instaladas en la imagen productiva. En la simulación
+se probó una solución experimental con glob 14.0.6 y minimatch 11.0.9, con cero
+avisos y 604 pruebas aprobadas, pero exige versiones transitivas mayores fuera de
+los rangos declarados por Mocha. **No se incorporan overrides**: se preservan
+package.json y el lockfile y se recomienda esperar una actualización compatible
+de Mocha. No se aplican cambios mayores automáticos ni `npm audit fix --force`.
 
 No se identifican requisitos funcionales obligatorios pendientes del Módulo 8.
 Las siguientes limitaciones no deben confundirse con funcionalidades implementadas:
@@ -1734,6 +1827,7 @@ es opcional y no exige una refactorización para esta entrega.
 
 La entrega se realiza en [agostinamasino/ShipNow](https://github.com/agostinamasino/ShipNow).
 Los resultados distinguen **604 pruebas locales** de **16 verificaciones Docker
-reales**; estas últimas corresponden a la Etapa 5 aprobada. La revisión final de
-solo README no requiere reconstruir la imagen: ese archivo está fuera del
-contexto productivo permitido por `.dockerignore`.
+reales**. En la Etapa 9 se vuelven a verificar las 16 comprobaciones con la imagen
+predeterminada y con una etiqueta alternativa. Los únicos archivos modificados,
+README y verificador independiente, están fuera del contexto productivo
+permitido por `.dockerignore`; no cambian la API ni requieren reconstruirla.

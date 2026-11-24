@@ -8,8 +8,29 @@ import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const executable = process.argv[2] ?? 'docker';
-const image = 'shipnow:m8';
+let executable = 'docker';
+let image = 'shipnow:m8';
+let hasExecutable = false, hasImage = false;
+for (let index = 2; index < process.argv.length; index++) {
+  const argument = process.argv[index];
+  if (argument === '--help') {
+    console.log('Uso: node docker-tests/verify.mjs [ruta-docker] [--image repositorio:etiqueta]');
+    process.exit(0);
+  }
+  if (argument === '--image') {
+    if (hasImage || !process.argv[index + 1] || process.argv[index + 1].startsWith('--')) {
+      throw new Error('Indicar --image una sola vez y con una etiqueta válida.');
+    }
+    image = process.argv[++index]; hasImage = true;
+  } else if (!argument.startsWith('-') && !hasExecutable) {
+    executable = argument; hasExecutable = true;
+  } else throw new Error('Argumento no reconocido. Consultar --help.');
+}
+// Referencias por nombre/tag, opcionalmente con registry y puerto; sin digest ni espacios.
+const imageReference = /^(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]+)?\/)?[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?$/;
+if (image.length > 255 || !imageReference.test(image)) {
+  throw new Error('Imagen inválida: usar un nombre/tag Docker sin espacios, credenciales ni opciones.');
+}
 const names = {
   network: 'shipnow-m8-test', mongo: 'shipnow-m8-mongo', api: 'shipnow-m8-api',
   missing: 'shipnow-m8-missing-config', unavailable: 'shipnow-m8-unavailable',
@@ -24,7 +45,7 @@ const overall = new AbortController();
 const deadline = setTimeout(() => overall.abort(new Error('La integración excedió 120 segundos.')), 120000);
 let temporary, origin, hostPort;
 function command(args, { allowFailure = false, timeout = 60000 } = {}) {
-  const result = spawnSync(executable, args, { encoding: 'utf8', timeout, maxBuffer: 16 * 1024 * 1024 });
+  const result = spawnSync(executable, args, { shell: false, encoding: 'utf8', timeout, maxBuffer: 16 * 1024 * 1024 });
   if (!allowFailure && (result.error || result.status !== 0)) throw new Error(`Docker ${args[0]} falló: ${result.error?.message ?? result.stderr}`);
   return result;
 }
@@ -195,7 +216,7 @@ try {
     assert.ok(logs.includes('fatal')); assert.ok(logs.includes('diagnostic')); assert.ok(!logs.includes('SERVER_LISTENING'));
     assert.ok(!logs.includes('mongodb://'));
   });
-  console.log(JSON.stringify({ checksPassed: results.length, hostPort, resources: names }));
+  console.log(JSON.stringify({ image, checksPassed: results.length, hostPort, resources: names }));
 } finally {
   for (const name of [...created.containers].reverse()) {
     if (ownedContainer(name) && inspect(name).State.Running) command(['stop', '--timeout', '15', name], { allowFailure: true });
@@ -210,6 +231,6 @@ try {
     assert.equal(path.dirname(target), root); assert.ok(path.basename(target).startsWith('shipnow-docker-'));
     await rm(target, { recursive: true, force: true });
   }
-  console.log('Limpieza de recursos propios finalizada; imagen shipnow:m8 conservada.');
+  console.log(`Limpieza de recursos propios finalizada; imagen ${image} conservada.`);
   clearTimeout(deadline);
 }

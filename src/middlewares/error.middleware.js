@@ -1,6 +1,7 @@
 import { AppError } from '../errors/app-error.js';
 import { ERROR_CATALOG } from '../errors/error.catalog.js';
 import logger from '../config/logger.js';
+import { diagnosticMetadata } from '../config/error-diagnostic.js';
 
 export function errorMiddleware(err, req, res, next) {
   if (res.headersSent) return next(err);
@@ -15,7 +16,9 @@ export function errorMiddleware(err, req, res, next) {
   }
 
   const severity = entry.status === 500 ? 'error' : 'warning';
-  logger[severity](`HTTP_ERROR code=${entry.code} status=${entry.status}`);
+  const event = `HTTP_ERROR code=${entry.code} status=${entry.status}`;
+  if (severity === 'error') logger.error(event, diagnosticMetadata(err));
+  else logger.warning(event);
 
   const error = { code: entry.code, message: entry.message };
   if (err instanceof AppError && err.details && entry.code !== 'INTERNAL_ERROR') {

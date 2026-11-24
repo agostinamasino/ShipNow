@@ -165,7 +165,11 @@ test('fallo durante el commit omite el éxito y el middleware registra un único
     json(body) { assert.equal(body.error.code, 'INTERNAL_ERROR'); },
   };
   errorMiddleware(failure, {}, res, () => assert.fail('No debe delegar'));
-  assert.deepEqual(events.at(-1), { level: 'error', args: ['HTTP_ERROR code=INTERNAL_ERROR status=500'] });
+  assert.equal(events.at(-1).level, 'error');
+  assert.equal(events.at(-1).args[0], 'HTTP_ERROR code=INTERNAL_ERROR status=500');
+  assert.equal(events.at(-1).args.length, 2);
+  assert.ok(events.at(-1).args[1].diagnostic.stack.includes('at '));
+  assert.ok(!JSON.stringify(events).includes(sensitive));
   assert.equal(events.filter(event => event.level === 'error').length, 1);
 });
 

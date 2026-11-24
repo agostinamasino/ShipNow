@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import config from './index.js';
+import { privateDiagnostic } from './error-diagnostic.js';
 
 export const LOG_LEVELS = Object.freeze({
   fatal: 0,
@@ -33,12 +34,17 @@ function safeMessage(message) {
     .slice(0, 1000);
 }
 
-// Reconstruye cada evento para descartar metadata, documentos, causas y símbolos crudos.
-const publicRecord = winston.format(info => ({
-  level: info.level,
-  message: safeMessage(info instanceof Error || typeof info.stack === 'string' ? undefined : info.message),
-  [Symbol.for('level')]: info[Symbol.for('level')],
-}));
+// Solo admite diagnóstico previamente saneado; nunca metadata o Error arbitrarios.
+const publicRecord = winston.format(info => {
+  const record = {
+    level: info.level,
+    message: safeMessage(info instanceof Error || typeof info.stack === 'string' ? undefined : info.message),
+    [Symbol.for('level')]: info[Symbol.for('level')],
+  };
+  const diagnostic = privateDiagnostic(info.diagnostic);
+  if (['error', 'fatal'].includes(info[Symbol.for('level')]) && diagnostic) record.diagnostic = diagnostic;
+  return record;
+});
 
 const importantOnly = winston.format(info =>
   ['error', 'fatal'].includes(info[Symbol.for('level')]) ? info : false);
@@ -61,7 +67,7 @@ export function createAppLogger({ nodeEnv = config.nodeEnv, logDirectory, consol
   consoleOutput.format = nodeEnv === 'development'
     ? winston.format.combine(
       winston.format.colorize({ colors }),
-      winston.format.printf(info => `${info.timestamp} ${info.level} ${info.message}`),
+      winston.format.printf(info => `${info.timestamp} ${info.level} ${info.message}${info.diagnostic ? '\n' + JSON.stringify(info.diagnostic, null, 2) : ''}`),
     )
     : winston.format.json();
   const transports = [consoleOutput];

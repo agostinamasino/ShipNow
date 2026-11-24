@@ -47,7 +47,7 @@ la preparación de testing la establece antes de importar los módulos.
 
 ## Ejecutar
 
-1. Usar Node.js 22.21 o superior y ejecutar `npm install`.
+1. Usar Node.js 22.21.0 o superior y ejecutar `npm ci --include=dev`.
 2. Configurar `.env` en la raíz. Si falta, copiar `.env.example` a `.env`.
 3. Iniciar MongoDB local o configurar una conexión de MongoDB Atlas.
 4. Ejecutar `npm run dev` (reinicio automático) o `npm start`.
@@ -88,6 +88,59 @@ especiales de la contraseña para una URL. No compartir `.env`: Git lo ignora.
 El servidor escucha mientras intenta conectarse a MongoDB. Si la conexión inicial
 falla, los GET de mocks, Swagger y `/health` siguen disponibles. Products, Users y Orders requieren
 MongoDB para leer o guardar documentos.
+
+## Instalación desde un clon limpio (PowerShell)
+
+El rango `engines.node` es `>=22.21.0`: fija como mínimo la versión comprobada
+con las dependencias actuales. La verificación de esta etapa usa Node 22.21.0 y
+npm 11.6.2. No es necesario instalar Mocha globalmente.
+
+```powershell
+git clone https://github.com/agostinamasino/ShipNow.git
+Set-Location ShipNow
+node --version
+npm --version
+npm ci --include=dev
+npm ls mocha chai supertest --depth=0
+
+# Crear solamente si no existe; nunca sobrescribir la configuración local.
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+```
+
+Editar localmente `.env` con `PORT`, `MONGODB_URI` y `NODE_ENV=development`,
+siguiendo el ejemplo anterior. No compartir credenciales ni subir ese archivo.
+Para ejecutar la API con persistencia se necesita una instancia MongoDB propia;
+las pruebas utilizan persistencia simulada y directorios temporales, sin Atlas
+ni la base real. Su preparación establece `NODE_ENV=test` antes de importar la API.
+
+```powershell
+npm run test:regression
+npm run test:functional
+npm test
+npm run dev
+# Alternativa sin reinicio automático: npm start
+```
+
+Con el servidor iniciado, desde otra terminal (ajustar el puerto si cambia):
+
+```powershell
+Invoke-RestMethod http://localhost:3000/health
+Start-Process http://localhost:3000/api/docs
+# Comprobar también la interfaz desde la terminal:
+curl.exe -L http://localhost:3000/api/docs
+```
+
+Mocha, Chai y Supertest son `devDependencies` porque sirven para verificar el
+proyecto, no para atender solicitudes en producción. Una instalación con
+`--omit=dev` o con `NODE_ENV=production` sin inclusión explícita puede omitirlas.
+Si aparece «mocha no se reconoce» o «mocha: not found», comprobar que se está en
+la raíz con `package.json`, revisar `node --version`, `npm config get omit` y
+`npm ls mocha chai supertest --depth=0`, y ejecutar `npm ci --include=dev`.
+Este comando incluye las herramientas aun cuando el entorno de instalación sea
+`production`; después ejecutar las pruebas con sus scripts, que preparan el
+entorno `test`. Los scripts resuelven Mocha desde `node_modules/.bin`.
+`npm ci` reinstala conforme al lockfile; `npm install` también está admitido,
+pero para reproducir la revisión se recomienda `npm ci --include=dev`.
 
 ## Probar con Postman o Thunder Client
 
@@ -512,7 +565,8 @@ Un número menor representa mayor severidad. `LOG_LEVELS` está congelado median
 ### Archivos, rotación y protección de datos
 
 Los archivos se guardan en `logs/errors-%DATE%.log`, dentro de la raíz del
-proyecto. Cada línea contiene JSON válido con `timestamp`, `level` y `message`.
+proyecto. Cada línea contiene JSON válido con `timestamp`, `level` y `message`,
+y opcionalmente `diagnostic` en eventos `error` y `fatal`.
 
 ```json
 {"timestamp":"2026-11-13T12:00:00.000Z","level":"error","message":"MONGODB_CONNECTION_FAILED"}
@@ -531,10 +585,34 @@ consola según el entorno. `.gitignore` excluye toda la carpeta `logs/`, incluid
 archivos rotados y archivos de auditoría.
 
 La aplicación usa mensajes fijos y cantidades controladas. El formato descarta
-metadatos, documentos, cuerpos y objetos Error, y sanitiza patrones reconocibles
-de URI, correos y credenciales. Los puntos de logging deben seguir enviando
-únicamente mensajes controlados, pues la sanitización no identifica cualquier
-secreto arbitrario dentro de texto libre. Ante fallos de transporte se emite una
+metadatos arbitrarios, documentos, cuerpos y objetos Error crudos. Para conservar
+diagnósticos privados se usa `diagnosticMetadata(error)` de
+`src/config/error-diagnostic.js`: selecciona tipo, mensaje saneado, stack y causas
+Error (incluida `AppError.cause`), sin serializar otras propiedades. Solo los
+diagnósticos producidos por ese helper se aceptan en `error` y `fatal`.
+Las rutas propias del stack se expresan como `<app>/...` con línea y columna;
+las rutas externas absolutas se omiten. El arranque, el middleware global y los
+fallos de limpieza o streaming conservan así el origen sin enviarlo al cliente.
+
+Ejemplo ficticio de registro privado (el mensaje HTTP sigue siendo genérico):
+
+```json
+{"timestamp":"2026-11-23T12:00:00.000Z","level":"error","message":"HTTP_ERROR code=INTERNAL_ERROR status=500","diagnostic":{"name":"Error","message":"Fallo al confirmar la escritura","stack":"Error: Fallo al confirmar la escritura\n    at guardar (<app>/src/repositories/example.repository.js:10:5)"}}
+```
+
+El helper limita cada mensaje a 512 caracteres, cada stack a 4096 y 12 frames,
+con profundidad de causas de 3 niveles, hasta 5 nodos y 12000 caracteres de
+texto diagnóstico. Redacta URI, correos, tokens y credenciales reconocibles,
+valores entre comillas y rutas; omite mensajes que aparenten documentos,
+validaciones con datos o nombres de archivos personales. No copia consultas,
+cuerpos, documentos ni contenido binario. Los niveles inferiores no conservan
+diagnósticos. En desarrollo se muestran legibles junto al evento; en producción
+se usa JSON. Estos registros requieren acceso privado al sistema de archivos:
+no forman parte de las respuestas HTTP ni se sirven desde Express.
+
+La sanitización no identifica cualquier secreto arbitrario dentro de texto libre;
+los puntos de logging deben seguir evitando entrada personal sin etiquetas.
+Ante fallos de transporte se emite una
 advertencia fija a stderr una sola vez por instancia, fuera de Winston para
 evitar recursión.
 
@@ -554,7 +632,7 @@ evitar recursión.
 | Seed confirmado | `MOCK_SEED_COMPLETED users=... couriers=... orders=... deliveries=...` en `info`, después del commit. |
 | Archivos asociados | `FILE_UPLOAD_COMPLETED entity=... documentType=... size=...` en `info`, después de confirmar los metadatos. |
 | Consulta de archivos | `FILES_LISTED entity=... count=...` en `debug`. |
-| Fallo de limpieza | `FILE_CLEANUP_FAILED` en `error`, sin rutas ni mensajes internos. |
+| Fallo de limpieza | `FILE_CLEANUP_FAILED` en `error`, con diagnóstico privado saneado. |
 
 Los services de Products, Users y mocks registran los éxitos descritos en la tabla.
 Orders utiliza el resumen HTTP y el middleware global, sin eventos de negocio propios.
@@ -622,7 +700,8 @@ predeterminado será silencioso.
 
 Después de una llamada de demostración en desarrollo, los siguientes comandos
 leen todos los archivos de errores, incluidos los rotados por tamaño. Los campos
-de cada línea deben ser `timestamp`, `level` y `message`.
+de cada línea son `timestamp`, `level` y `message`; los eventos `error` y `fatal`
+pueden incluir además `diagnostic` con información privada saneada.
 
 ```powershell
 $records = @(Get-ChildItem './logs/errors-*.log*' | Get-Content | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -1092,6 +1171,15 @@ documentación verifican también los contratos y `/api/docs` sin conexión.
 
 Resultado de referencia tras incorporar descarga: **378 aprobadas, 148 de regresión
 y 230 funcionales**, sin fallos. Las dos suites se ejecutan por separado dentro de `npm test`.
+
+Verificación del Módulo 8, Etapa 2: **388 aprobadas: 158 de regresión y 230
+funcionales**, incluidas 10 pruebas nuevas de diagnósticos privados. Se verifican
+dos ejecuciones completas consecutivas y ambas suites por separado. También se
+comprueba la instalación en dos copias temporales sin `.env`, uploads ni logs:
+`npm install` y `npm ci --include=dev` (esta última con entorno de instalación
+`production`), seguidas de las tres ejecuciones de pruebas en entorno `test`.
+Las versiones instaladas de las herramientas son Mocha 12.0.3, Chai 6.3.0 y
+Supertest 7.3.2. No se actualizan dependencias ni se utiliza la base real.
 
 ### Descarga controlada
 

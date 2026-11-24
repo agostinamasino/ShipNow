@@ -1,6 +1,7 @@
 import * as fileService from '../services/file.service.js';
 import { AppError } from '../errors/app-error.js';
 import logger from '../config/logger.js';
+import { diagnosticMetadata } from '../config/error-diagnostic.js';
 
 export function createFileController(storage) {
   return {
@@ -36,7 +37,7 @@ export function createFileController(storage) {
       stream.once('close', () => res.off('close', disconnected));
       stream.once('error', cause => {
         if (res.headersSent) {
-          logger.error('FILE_DOWNLOAD_STREAM_FAILED');
+          logger.error('FILE_DOWNLOAD_STREAM_FAILED', diagnosticMetadata(cause));
           res.destroy(); // Nunca agregar JSON a una respuesta binaria parcial.
         } else {
           for (const header of ['Content-Type', 'Content-Length', 'Content-Disposition', 'X-Content-Type-Options']) res.removeHeader(header);

@@ -5,10 +5,10 @@ let emailIndexPromise;
 function ensureEmailIndex() {
   if (!emailIndexPromise) {
     emailIndexPromise = User.collection.createIndex({ email: 1 }, { unique: true })
-      .catch(() => {
+      .catch(cause => {
         emailIndexPromise = undefined;
         // No confundir duplicados previos al crear el índice con el POST actual.
-        throw new Error('No se pudo garantizar la unicidad del correo electrónico.');
+        throw new Error('No se pudo garantizar la unicidad del correo electrónico.', { cause });
       });
   }
   return emailIndexPromise;

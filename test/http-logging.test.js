@@ -107,12 +107,15 @@ test('resúmenes HTTP y errores 400/404/409/413/500/503 usan datos controlados y
     assert.equal(summaries[0].args.length, 1);
     assert.match(summaries[0].args[0], /^HTTP_REQUEST method=(GET|POST) route=\S+ status=\d{3} durationMs=\d+\.\d{2}$/);
     assert.ok(summaries[0].args[0].includes(`route=${route} status=${entry.status} `));
-    assert.deepEqual(failures[0], {
-      level: code === 'INTERNAL_ERROR' ? 'error' : 'warning',
-      args: [`HTTP_ERROR code=${code} status=${entry.status}`],
-    });
+    assert.equal(failures[0].level, code === 'INTERNAL_ERROR' ? 'error' : 'warning');
+    assert.equal(failures[0].args[0], `HTTP_ERROR code=${code} status=${entry.status}`);
+    if (entry.status === 500) {
+      assert.equal(failures[0].args.length, 2);
+      assert.equal(typeof failures[0].args[1].diagnostic.stack, 'string');
+      assert.ok(failures[0].args[1].diagnostic.stack.includes('at '));
+    } else assert.equal(failures[0].args.length, 1);
     const serialized = JSON.stringify(events);
-    for (const forbidden of [privateValue, 'ana@example.com', '?', 'mongodb://', 'authorization', 'stack']) {
+    for (const forbidden of [privateValue, 'ana@example.com', '?', 'mongodb://', 'authorization']) {
       assert.ok(!serialized.includes(forbidden), forbidden);
     }
   }
@@ -192,8 +195,18 @@ for (const scenario of ['connected', 'disconnected', 'listen-failed']) {
         level: scenario === 'connected' ? 'info' : 'error',
         args: [scenario === 'connected' ? 'MONGODB_CONNECTED' : 'MONGODB_CONNECTION_FAILED'],
       }];
-    assert.deepEqual(JSON.parse(result.stdout), {
-      events: expected, exitCode: scenario === 'listen-failed' ? 1 : 0,
-    });
+    const output = JSON.parse(result.stdout);
+    assert.deepEqual(output.events.map(({ level, args }) => ({ level, args: [args[0]] })), expected);
+    assert.equal(output.exitCode, scenario === 'listen-failed' ? 1 : 0);
+    for (const event of output.events) {
+      if (['error', 'fatal'].includes(event.level)) {
+        assert.equal(event.args.length, 2);
+        assert.equal(event.args[1].diagnostic.name, 'Error');
+        assert.ok(event.args[1].diagnostic.stack.includes('at '));
+      } else assert.equal(event.args.length, 1);
+    }
+    for (const value of ['PRIVATE_LISTEN_VALUE', 'PRIVATE_CONNECTION_VALUE', 'mongodb://']) {
+      assert.ok(!result.stdout.includes(value));
+    }
   });
 }

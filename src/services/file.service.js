@@ -5,6 +5,7 @@ import { FILE_OWNERS } from '../constants/index.js';
 import { AppError } from '../errors/app-error.js';
 import { toFileError } from '../errors/file-error.js';
 import logger from '../config/logger.js';
+import { diagnosticMetadata } from '../config/error-diagnostic.js';
 
 function isObjectId(id) {
   return typeof id === 'string' && /^[a-fA-F0-9]{24}$/.test(id);
@@ -21,7 +22,7 @@ export async function validateOwner(ownerModel, id) {
 export async function cleanupFile(storage, relative) {
   if (!relative) return;
   try { await storage.remove(relative); }
-  catch { logger.error('FILE_CLEANUP_FAILED'); }
+  catch (error) { logger.error('FILE_CLEANUP_FAILED', diagnosticMetadata(error)); }
 }
 
 export async function discardTemporary(storage, file) {
@@ -39,7 +40,7 @@ export async function createFile(storage, owner, body, file) {
     if (typeof body.documentType !== 'string' || !body.documentType) throw new AppError('FILE_INVALID_DOCUMENT_TYPE');
     metadata = await storage.promote(file, { ownerModel: owner.ownerModel, documentType: body.documentType });
   } catch (error) {
-    if (error.code === 'FILE_CLEANUP_FAILED') logger.error('FILE_CLEANUP_FAILED');
+    if (error.code === 'FILE_CLEANUP_FAILED') logger.error('FILE_CLEANUP_FAILED', diagnosticMetadata(error));
     else await discardTemporary(storage, file);
     throw toFileError(error);
   }

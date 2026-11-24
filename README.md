@@ -1,6 +1,13 @@
 # ShipNow
 
-API académica de Backend 3 con Node.js, Express y MongoDB/Mongoose.
+API académica de logística para Backend 3, con Node.js >=22.21.0, Express 5,
+MongoDB/Mongoose y ES Modules. Utiliza Multer, Winston, Swagger/OpenAPI y testing
+con node:test, Mocha, Chai y Supertest.
+
+Estado de entrega del Módulo 8: **604 pruebas locales** (212 de regresión y 392
+funcionales), **16 verificaciones Docker reales** aprobadas en la Etapa 5,
+**19 operaciones HTTP** y **30 schemas OpenAPI**. La auditoría final modifica
+solo documentación y no repite ni sustituye la integración Docker aprobada.
 Products, Users, Orders y mocks siguen la arquitectura por capas.
 
 | Capa | Responsabilidad |
@@ -45,6 +52,37 @@ coordina la conexión y el servidor HTTP según el entorno, y registra el arranq
 El ciclo de vida compartido está en `src/utils/server-lifecycle.js`.
 Importar la aplicación para pruebas requiere la configuración de entorno válida;
 la preparación de testing la establece antes de importar los módulos.
+
+## Estructura actual
+
+```text
+src/
+  app.js                 # Express sin conexión ni listen al importar
+  server.js              # Entrada productiva
+  config/                # Entorno, logger, diagnósticos, Multer y Swagger
+  constants/             # Roles, estados, prioridades y políticas de archivos
+  routes/                # Rutas y delegación
+  controllers/           # Solicitud y respuesta HTTP exitosa
+  services/              # Reglas de negocio y generación de mocks
+  repositories/          # Operaciones Mongoose y transacción de seed
+  models/                # Product, User, Order, Delivery y UploadedFile
+  errors/                # Catálogo, AppError y traducción de errores de archivos
+  middlewares/           # Errores, 404, HTTP logging y recepción multipart
+  docs/                  # Schemas, respuestas, paginación y paths OpenAPI
+  utils/                 # Paginación, almacenamiento y ciclo de vida del servidor
+test/                    # Regresión con node:test
+tests/                   # Funcionales con Mocha, Chai y Supertest
+test-support/            # Entorno aislado y helpers compartidos
+docker-tests/verify.mjs   # Integración Docker explícita e independiente
+Dockerfile
+.dockerignore
+.env.example             # Referencia sin credenciales; .env real ignorado
+```
+
+Las fábricas `createApp({ uploadRoot })`, `createUploadStorage({ root })`,
+`createAppLogger(...)` y `startServer({ app, database, logger, config, ... })`
+permiten sustituir recursos de infraestructura en pruebas. No se añade un
+contenedor de inyección ni se cambia la arquitectura para esa recomendación.
 
 ## Ejecutar
 
@@ -183,10 +221,10 @@ Verificación de esta etapa: 604 pruebas (212 de regresión y 392 funcionales),
 incluidas 39 nuevas. Se comprueban arranque/cierre con recursos simulados y
 procesos aislados; no se accede a Atlas ni se ejecuta seed real.
 
-La sección siguiente incorpora las instrucciones preliminares de Docker de la
-Etapa 5; la revisión integral de documentación corresponde a la Etapa 6.
+La sección siguiente reúne la configuración Docker verificada en la Etapa 5
+y revisada para la entrega del Módulo 8.
 
-## Docker — verificación preliminar del Módulo 8
+## Docker — construcción, ejecución y verificación
 
 Requiere Docker con motor de contenedores Linux; en Windows se verificó Docker
 Desktop con WSL 2, Docker 29.9.3 y arquitectura amd64. Para ejecutar la API en
@@ -269,6 +307,77 @@ El arranque productivo espera MongoDB; una configuración crítica ausente o la
 conexión inicial fallida impiden escuchar y producen salida no cero. Health,
 Swagger y endpoints principales están habilitados en producción; mocks, seed y
 logger-test responden 404 ROUTE_NOT_FOUND. El catálogo OpenAPI sigue completo.
+
+### Ejemplo Docker completo con MongoDB local aislado
+
+Este ejemplo académico crea una instancia propia accesible por nombre en una red
+Docker, sin Atlas ni la base real. No ejecuta seed. Usar nombres libres; si ya
+existen recursos `shipnow-demo-*`, revisarlos o elegir otros nombres, sin borrar
+recursos ajenos. MongoDB no publica puertos ni usa credenciales en este ejemplo;
+no es una configuración de base de datos para exposición pública. La API publica
+únicamente localhost y los datos ficticios quedan en volúmenes persistentes.
+
+PowerShell, desde la raíz y con la imagen construida:
+
+```powershell
+docker network create shipnow-demo-net
+docker volume create shipnow-demo-db
+docker volume create shipnow-demo-uploads
+docker volume create shipnow-demo-logs
+docker run -d --name shipnow-demo-mongo --network shipnow-demo-net --mount type=volume,source=shipnow-demo-db,target=/data/db mongo:8.0
+$mongoReady = $false
+for ($attempt = 0; $attempt -lt 30; $attempt++) {
+  docker exec shipnow-demo-mongo mongosh --quiet --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 1)' *> $null
+  if ($LASTEXITCODE -eq 0) { $mongoReady = $true; break }
+  Start-Sleep -Seconds 1
+}
+if (-not $mongoReady) { throw 'MongoDB de demostración no está disponible; revisar docker logs shipnow-demo-mongo' }
+docker run -d --init --name shipnow-demo-api --network shipnow-demo-net `
+  --env NODE_ENV=production --env PORT=3000 --env LOG_LEVEL=info `
+  --env 'MONGODB_URI=mongodb://shipnow-demo-mongo:27017/shipnow_demo_test' `
+  --publish 127.0.0.1:3000:3000 `
+  --mount type=volume,source=shipnow-demo-uploads,target=/app/uploads `
+  --mount type=volume,source=shipnow-demo-logs,target=/app/logs shipnow:m8
+# Esperar el arranque; estos comandos no insertan documentos.
+docker logs shipnow-demo-api
+curl.exe --retry 10 --retry-connrefused --retry-delay 1 --fail http://localhost:3000/health
+curl.exe --fail -L http://localhost:3000/api/docs/
+```
+
+Los comandos Docker de creación anteriores funcionan también en Linux/macOS.
+Reemplazar el bucle de espera y el comando de API por:
+
+```sh
+attempt=0
+until docker exec shipnow-demo-mongo mongosh --quiet --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 1)' >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 30 ]; then echo 'MongoDB no disponible'; exit 1; fi
+  sleep 1
+done
+docker run -d --init --name shipnow-demo-api --network shipnow-demo-net --env NODE_ENV=production --env PORT=3000 --env LOG_LEVEL=info --env 'MONGODB_URI=mongodb://shipnow-demo-mongo:27017/shipnow_demo_test' --publish 127.0.0.1:3000:3000 --mount type=volume,source=shipnow-demo-uploads,target=/app/uploads --mount type=volume,source=shipnow-demo-logs,target=/app/logs shipnow:m8
+curl --retry 10 --retry-connrefused --retry-delay 1 --fail http://localhost:3000/health
+curl --fail -L http://localhost:3000/api/docs/
+```
+
+Si 3000 está ocupado, cambiar solo el puerto del host, por ejemplo a
+`127.0.0.1:3001:3000`, y consultar localhost:3001. El MongoDB standalone de este
+ejemplo sirve para Products, Users, Orders y archivos; el seed requiere un replica
+set o Atlas y, además, solo está habilitado en development/test.
+
+Al terminar la demostración, estos comandos detienen y eliminan únicamente sus
+contenedores y red, **conservando los tres volúmenes nombrados y sus datos**:
+
+```sh
+docker stop --timeout 15 shipnow-demo-api
+docker rm shipnow-demo-api
+docker stop --timeout 15 shipnow-demo-mongo
+docker rm -v shipnow-demo-mongo
+docker network rm shipnow-demo-net
+```
+
+No eliminar volúmenes con datos importantes sin respaldo. Para repetir el ejemplo
+con los mismos volúmenes, recrear la red y contenedores y reutilizar los volúmenes
+existentes; no ejecutar una limpieza global de Docker.
 
 ### Volúmenes, permisos y cierre
 
@@ -369,6 +478,26 @@ Start-Process http://localhost:3000/api/docs
 # Comprobar también la interfaz desde la terminal:
 curl.exe -L http://localhost:3000/api/docs
 ```
+
+Alternativa para Linux/macOS desde un clon limpio:
+
+```sh
+git clone https://github.com/agostinamasino/ShipNow.git
+cd ShipNow
+node --version
+npm --version
+npm ci --include=dev
+if [ ! -f .env ]; then cp .env.example .env; fi
+# Editar .env localmente y configurar MongoDB propio antes de iniciar la API.
+npm run test:regression
+npm run test:functional
+npm test
+npm run dev
+```
+
+En otra terminal: `curl -i http://localhost:3000/health` y abrir
+`http://localhost:3000/api/docs/` en el navegador. Para ejecutar sin watch usar
+`npm start`. No repetir git clone si ya se está trabajando dentro del proyecto.
 
 Mocha, Chai y Supertest son `devDependencies` porque sirven para verificar el
 proyecto, no para atender solicitudes en producción. Una instalación con
@@ -577,11 +706,9 @@ Se conservan JSON de 100 KB, archivos de 5 MiB, un archivo/un campo/dos partes
 multipart, validación MIME/extensión/firma y descarga por bloques. No se agregan
 lecturas completas de archivos, consultas por cada registro ni logs por documento.
 
-Verificación de esta etapa: **565 pruebas aprobadas**, 176 de regresión y 389
-funcionales. Se incorporan 18 pruebas de regresión y 159 funcionales (177 nuevas),
-y se adaptan los contratos anteriores conservando las comprobaciones de contenido.
-Las suites individuales y dos ejecuciones completas consecutivas se verifican
-sin Atlas, seed real ni archivos residuales en las carpetas del proyecto.
+La cobertura de paginación está en `test/pagination.test.js` y
+`tests/pagination/pagination.test.js`; verifica contenido, metadata, validación,
+consultas acotadas y aislamiento. Forma parte de las 604 pruebas actuales.
 
 ## Constantes y compatibilidad de estados
 
@@ -619,11 +746,14 @@ No se ejecuta una migración ni se modifican documentos previos. Un estado hist�
 fuera de los booleanos y strings admitidos requiere revisión manual; no se corrige
 silenciosamente (GET responde 500). Los roles históricos tampoco se migran.
 
-`npm test` incluye las 24 pruebas de configuración y pruebas sin base de datos para
+`npm test` incluye pruebas de configuración y pruebas sin base de datos para
 la inmutabilidad de constantes, estados heredados, enums de modelos y validación
 del service. Las pruebas automatizadas no modifican Atlas ni el `.env` real.
 
 ## Vistas previas de mocks
+
+Disponibles solo en development y test. En production devuelven 404
+ROUTE_NOT_FOUND sin ejecutar la generación.
 
 Cada GET genera datos en memoria sin guardarlos en MongoDB. Devuelve HTTP 200 y
 admite `qty` como entero entre 0 y 100 (10 por defecto). Cero devuelve listas
@@ -685,6 +815,9 @@ correos cambian entre llamadas.
 
 ## Cargar un lote de prueba
 
+Disponible solo en development y test; en production devuelve 404
+ROUTE_NOT_FOUND. Usar exclusivamente una base de prueba con transacciones.
+
 `POST /api/mocks/seed` inserta documentos en MongoDB. Por ejemplo,
 `POST /api/mocks/seed?qty=10` inserta **10 usuarios, 10 repartidores, 10 pedidos
 y 10 entregas**. El total es cuatro veces `qty`, por lo que el máximo es
@@ -736,8 +869,8 @@ y un fallo inesperado **500**. Los GET de vistas previas funcionan independiente
 
 ### Probar los mocks en local
 
-Seguí los pasos de [Ejecutar](#ejecutar) y usá el puerto de `PORT` (3000 en los
-ejemplos). Para las vistas previas alcanza con que el servidor esté escuchando.
+Seguí los pasos de [Ejecutar](#ejecutar), con NODE_ENV=development, y usá el
+puerto de `PORT` (3000 en los ejemplos). Para las vistas previas alcanza con que el servidor esté escuchando.
 Para ejecutar el seed, apuntá la configuración a una base de prueba con soporte
 de transacciones y esperá a que el servidor confirme la conexión.
 
@@ -825,7 +958,8 @@ inválido. Estos son otros cuerpos completos que devuelve la API.
 
 Con el servidor en ejecución, ajustá el puerto si corresponde. Para el 409,
 usá un correo ya registrado en tu base de prueba. Para el 503, ejecutá el comando
-indicado contra una instancia de ShipNow que esté escuchando con MongoDB desconectado.
+indicado contra una instancia de ShipNow en development que esté escuchando con MongoDB desconectado.
+En production el arranque exige conexión inicial y el seed está deshabilitado.
 El caso 500 usa una prueba automatizada que simula un fallo de persistencia.
 
 **PowerShell**
@@ -859,13 +993,13 @@ node --import ./test-support/setup.js --test --test-name-pattern 'Products propa
 ## Logging y monitoreo básico
 
 ShipNow usa `winston` y `winston-daily-rotate-file`. La instancia compartida está
-en `src/config/logger.js`, consume `config.nodeEnv` de `src/config/index.js` y se
+en `src/config/logger.js`, consume `config.nodeEnv` y `config.logLevel` de `src/config/index.js` y se
 importa en servidor, middlewares, services y controller de demostración.
 `createAppLogger` permite crear instancias aisladas para pruebas.
 
 | Nivel | Prioridad | Propósito |
 | --- | --- | --- |
-| `fatal` | 0 | Fallo del servidor HTTP que impide escuchar. El endpoint de demostración también emite un evento identificado como prueba. |
+| `fatal` | 0 | Fallo del servidor HTTP o de conexión inicial en production. El endpoint de demostración también emite un evento identificado como prueba. |
 | `error` | 1 | Error inesperado o fallo de conexión inicial a MongoDB mientras el servidor sigue disponible parcialmente. |
 | `warning` | 2 | Error conocido de validación, conflicto, ruta inexistente o indisponibilidad temporal del seed. |
 | `info` | 3 | Arranque, conexión establecida, creación de producto o usuario e inicio y confirmación del seed. |
@@ -1078,7 +1212,7 @@ obligatorias. Desde la raíz del proyecto, los siguientes comandos funcionan
 tanto en PowerShell como en Linux/macOS.
 
 ```sh
-npm install
+npm ci --include=dev
 npm start
 ```
 
@@ -1198,7 +1332,7 @@ este HTTP 400 de mocks.
 
 Las validaciones de Products, Users y Orders pueden incluir `error.details.fields` con
 nombres de campos permitidos. Los ejemplos se construyen a partir del catálogo
-de 32 códigos. Si varios códigos usan el mismo status, aparecen como ejemplos
+de 33 códigos. Si varios códigos usan el mismo status, aparecen como ejemplos
 de una única respuesta OpenAPI, sin sobrescribirse.
 
 Ejecutá la regresión con estos comandos, válidos en ambos sistemas.
@@ -1223,23 +1357,24 @@ ni archivos nuevos en la carpeta real `logs/`.
 
 ## Módulo 6 · Testing funcional
 
-Los conteos de esta sección describen el cierre del Módulo 6. La sección del
-Módulo 7 detalla la ampliación de cobertura y el resultado actual.
+Esta sección describe la suite actual, ampliada en los Módulos 7 y 8: **604
+pruebas**, divididas en 212 de regresión y 392 funcionales. La integración Docker
+es independiente y contiene 16 verificaciones reales aprobadas.
 
 La suite nueva usa **Mocha**, **Chai** y **Supertest**, instalados como
 `devDependencies`. Mocha ejecuta y organiza las pruebas, Chai verifica resultados
 y Supertest envía solicitudes HTTP a la aplicación exportada por `src/app.js`.
 No hay que ejecutar `npm start` ni disponer de MongoDB para correr las suites.
 Instalá también las dependencias de desarrollo: desde un checkout con lockfile,
-`npm ci` prepara el entorno en PowerShell y Linux/macOS. No usar `--omit=dev`
+`npm ci --include=dev` prepara el entorno en PowerShell y Linux/macOS. No usar `--omit=dev`
 para ejecutar estas pruebas.
 
 ### Suites, estructura y comandos
 
 | Ubicación | Ejecutor y alcance |
 | --- | --- |
-| `test/` | 140 pruebas de regresión con `node:test` y `node:assert/strict`: configuración, modelos, dominio, logging, errores, HTTP y contratos OpenAPI. |
-| `tests/` | 134 pruebas funcionales con Mocha, Chai y Supertest: `health/`, `products/`, `users/`, `orders/`, `mocks/`, `logger/`, `swagger/` y `errors/`. |
+| `test/` | 212 pruebas de regresión con `node:test` y `node:assert/strict`: configuración, modelos, dominio, logging, errores, HTTP y contratos OpenAPI. |
+| `tests/` | 392 pruebas funcionales con Mocha, Chai y Supertest: `health/`, `products/`, `users/`, `orders/`, `mocks/`, `logger/`, `swagger/`, `errors/`, `uploads/`, `pagination/` y `environment/`. |
 | `tests/support/` | Helpers de expectativas, reemplazos, invariantes del dominio y barreras de aislamiento. |
 | `test-support/setup.js` | Preparación del entorno antes de importar la aplicación en ambas suites. |
 | `.mocharc.json` | Carga la preparación y los hooks globales; descubre únicamente `tests/**/*.test.js`. |
@@ -1260,8 +1395,8 @@ npm test
 `npm test` ejecuta primero la regresión y, si pasa, la suite funcional, en procesos
 separados. Node descubre exclusivamente `test/*.test.js` y Mocha exclusivamente
 `tests/**/*.test.js`: no ejecutan los mismos archivos dos veces. Las dos llamadas
-completas deben terminar sin limpieza manual. El resultado de referencia del
-Módulo 6 es **274 pruebas aprobadas: 140 de regresión y 134 funcionales**.
+completas deben terminar sin limpieza manual. El resultado actual es **604
+pruebas aprobadas: 212 de regresión y 392 funcionales**.
 
 Para seleccionar casos de Mocha, por ejemplo Orders:
 
@@ -1271,24 +1406,27 @@ npm run test:functional -- --grep 'Orders por HTTP'
 
 ### Cobertura funcional y contratos
 
-| Recurso | Pruebas | Casos principales |
-| --- | ---: | --- |
-| Health | 1 | HTTP 200, JSON y body exacto. |
-| Products | 11 | GET/POST, defaults, campos, precio/stock/estado inválidos y fallos de lectura. |
-| Users | 10 | GET/POST, normalización, validaciones, duplicados previos y al guardar, fallos internos. |
-| Orders | 38 | Listado con datos y vacío, creación mínima/completa, defaults, referencias, rol USER, ID inválido, 404 y errores de persistencia. |
-| GET de mocks | 40 | Las cuatro rutas, qty predeterminado/válido/0/100, cantidades inválidas, roles, enums y relaciones. |
-| Seed | 22 | HTTP 201 con qty o body, relaciones, IDs devueltos, validaciones, 503 y rollback simulado. |
-| Logger | 3 | Ruta disponible en development y ausente en test/production. |
-| Swagger UI | 5 | HTML y recursos servidos sin MongoDB. |
-| Errores globales | 4 | 400 JSON inválido, 404, 413 y 500 sin datos internos. |
+| Recurso | Casos principales |
+| --- | --- |
+| Health | HTTP 200, cuatro campos, entorno efectivo, uptime y fecha válidos. |
+| Products | GET/POST, defaults, campos, precio/stock/estado inválidos y fallos de lectura. |
+| Users | GET/POST, normalización, validaciones, duplicados previos y al guardar, fallos internos. |
+| Orders | Listado con datos y vacío, creación mínima/completa, defaults, referencias, rol USER, ID inválido, 404 y errores de persistencia. |
+| GET de mocks | Las cuatro rutas, qty predeterminado/válido/0/100, cantidades inválidas, roles, enums y relaciones. |
+| Seed | HTTP 201 con qty o body, relaciones, IDs devueltos, validaciones, 503 y rollback simulado. |
+| Logger | Ruta disponible en development y ausente en test/production. |
+| Swagger UI | HTML y recursos servidos sin MongoDB. |
+| Errores globales | 400 JSON inválido, 404, 413 y 500 sin datos internos. |
+| Archivos | Carga, metadatos, descarga PDF/JPEG/PNG, bytes, aislamiento, limpieza, fallos y cancelaciones. |
+| Paginación | Cinco listados, defaults, páginas, límites, parámetros inválidos, filtros y conteos. |
+| Entornos | Política development/test/production, health sin consultas y rutas internas deshabilitadas. |
 
 Las respuestas de error se comparan con el catálogo real, incluyendo
 `details.fields` solo cuando corresponde. Para Orders se comprueba que un ID
 inválido no consulte persistencia y que entradas rechazadas no inserten documentos.
 JSON `null` es rechazado por el parser estricto de Express con `INVALID_JSON` antes
 de llegar al service. Las comprobaciones documentales de regresión verifican las
-las operaciones, schemas, enums, defaults, referencias `$ref`, ejemplos y respuestas
+operaciones, schemas, enums, defaults, referencias `$ref`, ejemplos y respuestas
 HTTP con persistencia simulada.
 
 No se prueba actualización de estados: no existe PATCH y el dominio no define
@@ -1297,7 +1435,7 @@ de Deliveries, autenticación, ítems o totales de pedidos.
 
 ### Entorno, persistencia simulada y limpieza
 
-`test-support/setup.js` fija `NODE_ENV=test`, `PORT=3000` y una URI local ficticia
+`test-support/setup.js` fija `NODE_ENV=test`, `LOG_LEVEL=debug`, `PORT=3000` y una URI local ficticia
 para una base llamada `shipnow_test_unused` antes de importar módulos dependientes
 del entorno. Esa URI **no se utiliza para conectar ni requiere una base existente**.
 No se usa la conexión principal ni se modifica `.env`. La configuración productiva
@@ -1344,7 +1482,8 @@ Multer 2.5.0. La configuración está centralizada en `src/config/multer.js`;
 `files.routes.js`, `file.controller.js`, `file.service.js` y `file.repository.js`
 mantienen las capas existentes. Los bytes se guardan en disco y únicamente los
 metadatos en la colección independiente del modelo `UploadedFile`. Los modelos
-User, Order y Delivery conservan sus contratos. No se modifican estados.
+Los modelos User, Order y Delivery no se modifican para asociar archivos. No se
+modifican estados. Los listados usan el contrato paginado del Módulo 8.
 
 | Método y ruta | Entrada y respuesta |
 | --- | --- |
@@ -1488,23 +1627,17 @@ npm test
 npm test
 ```
 
-Las pruebas de uploads están en `tests/uploads/`: 28 de infraestructura y 43 de
-endpoints. Usan archivos reales únicamente en carpetas temporales aisladas,
+Las pruebas de uploads están en `tests/uploads/`: 28 de infraestructura, 43 de endpoints y 25 de descarga. Usan archivos reales únicamente en carpetas temporales aisladas,
 restauradas y eliminadas por hooks; Mongoose se simula. No requieren Atlas ni una
-base real y no demuestran persistencia MongoDB real o atomicidad. Las pruebas de
+base real y no demuestran por sí solas persistencia MongoDB real o atomicidad. La integración
+Docker separada sí verificó persistencia real y reemplazo de la API. Las pruebas de
 documentación verifican también los contratos y `/api/docs` sin conexión.
 
-Resultado de referencia tras incorporar descarga: **378 aprobadas, 148 de regresión
-y 230 funcionales**, sin fallos. Las dos suites se ejecutan por separado dentro de `npm test`.
-
-Verificación del Módulo 8, Etapa 2: **388 aprobadas: 158 de regresión y 230
-funcionales**, incluidas 10 pruebas nuevas de diagnósticos privados. Se verifican
-dos ejecuciones completas consecutivas y ambas suites por separado. También se
-comprueba la instalación en dos copias temporales sin `.env`, uploads ni logs:
-`npm install` y `npm ci --include=dev` (esta última con entorno de instalación
-`production`), seguidas de las tres ejecuciones de pruebas en entorno `test`.
-Las versiones instaladas de las herramientas son Mocha 12.0.3, Chai 6.3.0 y
-Supertest 7.3.2. No se actualizan dependencias ni se utiliza la base real.
+Las verificaciones de instalación limpia de la Etapa 2 se realizaron con
+`npm install` y `npm ci --include=dev`, esta última también con entorno de
+instalación production. Las pruebas se ejecutan con su preparación test, sin
+la base real. Mocha 12.0.3, Chai 6.3.0 y Supertest 7.3.2 siguen siendo
+herramientas de desarrollo, ausentes de la imagen productiva.
 
 ### Descarga controlada
 
@@ -1557,3 +1690,50 @@ la descarga no agrega antivirus ni resuelve la falta de atomicidad entre disco y
 `tests/uploads/download.test.js` agrega 25 casos con disco temporal y MongoDB simulado:
 PDF/JPEG/PNG, bytes exactos, headers, errores, traversal, junctions, aislamiento de
 raíces, fallos antes/después de headers y cancelación con cierre de descriptor.
+
+## Auditoría final y limitaciones del alcance
+
+Auditoría de dependencias realizada el **23 de noviembre de 2026** sobre el
+lockfile entregado, sin instalar ni actualizar paquetes:
+
+| Comprobación | Resultado |
+| --- | --- |
+| `npm audit --omit=dev` | 0 vulnerabilidades productivas. |
+| `npm audit` | 3 moderadas en desarrollo: glob, minimatch y Mocha por su cadena de dependencias. Sin altas ni críticas. |
+| Sistema operativo de la imagen | No se realizó un escaneo; el resultado npm no lo cubre. |
+
+Los avisos de [glob](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4) y
+[minimatch](https://github.com/advisories/GHSA-g3hv-75wg-m249) afectan la cadena de
+Mocha. Estas herramientas no están instaladas en la imagen productiva. Queda
+pendiente evaluar una actualización compatible de testing en una tarea separada;
+no se aplican cambios mayores automáticos ni `npm audit fix --force`.
+
+No se identifican requisitos funcionales obligatorios pendientes del Módulo 8.
+Las siguientes limitaciones no deben confundirse con funcionalidades implementadas:
+
+- API académica sin autenticación ni autorización: no exponerla públicamente ni
+  cargar documentación personal real. No existe JWT ni permisos por identidad.
+- Health comprueba el proceso HTTP, no la disponibilidad continua de MongoDB.
+- Offset limitado a 10000, conteo exacto con costo y sin snapshot entre consultas.
+  Cursor, caché y escalado horizontal son mejoras opcionales, sin benchmarks aquí.
+- Archivos locales y MongoDB no forman una transacción conjunta. Se requiere
+  respaldo coordinado de base, uploads y logs, reconciliación de huérfanos si hay
+  caídas y una política administrativa de retención. La firma básica no es antivirus.
+- La raíz de archivos debe estar bajo control de la aplicación. No se comparte
+  staging entre filesystems ni se usa express.static para publicar uploads.
+- Revisar vulnerabilidades de desarrollo y parches de la base Docker es trabajo
+  de mantenimiento; cero avisos npm productivos no equivale a seguridad integral.
+- No hay PATCH de estados, CRUD de Deliveries, ítems/totales de pedidos ni
+  sincronización automática entre entregas y pedidos.
+
+La separación Service/Repository, constantes, transacciones de seed, errores
+centralizados, diagnósticos privados, Swagger, testing aislado y cargas/descargas
+atienden las devoluciones de los Módulos 1 a 7. La inyección se aplica en límites
+de infraestructura donde se necesita aislamiento; extenderla a todo el dominio
+es opcional y no exige una refactorización para esta entrega.
+
+La entrega se realiza en [agostinamasino/ShipNow](https://github.com/agostinamasino/ShipNow).
+Los resultados distinguen **604 pruebas locales** de **16 verificaciones Docker
+reales**; estas últimas corresponden a la Etapa 5 aprobada. La revisión final de
+solo README no requiere reconstruir la imagen: ese archivo está fuera del
+contexto productivo permitido por `.dockerignore`.

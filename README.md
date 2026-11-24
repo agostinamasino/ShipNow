@@ -183,7 +183,151 @@ Verificación de esta etapa: 604 pruebas (212 de regresión y 392 funcionales),
 incluidas 39 nuevas. Se comprueban arranque/cierre con recursos simulados y
 procesos aislados; no se accede a Atlas ni se ejecuta seed real.
 
-La entrega aún no incluye instrucciones definitivas de Docker.
+La sección siguiente incorpora las instrucciones preliminares de Docker de la
+Etapa 5; la revisión integral de documentación corresponde a la Etapa 6.
+
+## Docker — verificación preliminar del Módulo 8
+
+Requiere Docker con motor de contenedores Linux; en Windows se verificó Docker
+Desktop con WSL 2, Docker 29.9.3 y arquitectura amd64. Para ejecutar la API en
+producción se necesita un MongoDB accesible desde la red del contenedor. No se
+requieren herramientas de testing dentro de la imagen ni Docker Compose.
+
+```powershell
+docker --version
+docker info --format '{{.OSType}} {{.Architecture}}'
+docker build -t shipnow:m8 .
+```
+
+El Dockerfile usa `node:22-bookworm-slim`, fijada al digest
+`sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee`.
+La construcción verificada utiliza Node **22.23.5** (compatible con >=22.21.0),
+npm 10.9.9 y produce una imagen de **377435530 bytes**, aproximadamente 360 MiB.
+El digest fija la base utilizada; una actualización futura requiere revisión y
+reconstrucción. Estos datos describen esta construcción y no son benchmarks.
+
+Se copian primero los manifiestos para reutilizar la capa de dependencias y se
+ejecuta `npm ci --omit=dev`. Luego se copia solamente `src/`, que incluye OpenAPI.
+`package.json` permanece disponible porque Swagger consulta su versión. El usuario
+es `node` (UID 1000), con escritura en `/app/uploads` y `/app/logs`. Los archivos
+del código y dependencias no necesitan ser escribibles por ese usuario.
+
+`CMD ["node", "src/server.js"]` equivale al script `npm start` y evita un proceso
+npm intermedio al entregar señales. Usar `--init` agrega el init liviano de Docker.
+La imagen declara production y PORT=3000 por defecto, sin MONGODB_URI ni secretos.
+EXPOSE documenta el puerto; la publicación se configura al ejecutar el contenedor.
+
+`.dockerignore` permite únicamente los manifiestos y `src/`, con exclusiones
+adicionales recursivas para `.env*`, `.git`, dependencias locales, logs, uploads,
+coverage, pruebas, archivos temporales y configuraciones privadas. El README,
+`.env.example` y recursos de desarrollo quedan fuera de la imagen. No se copia
+el `.env` real, pero se conserva `.env.example` en Git como referencia.
+
+### Configuración externa y ejecución en PowerShell
+
+Preparar fuera del repositorio un archivo privado con `PORT`, `MONGODB_URI`,
+`NODE_ENV` y, opcionalmente, `LOG_LEVEL`. No subirlo a Git ni compartir sus valores.
+La URI debe apuntar a un MongoDB accesible: `localhost` dentro del contenedor
+identifica al propio contenedor, no al equipo Windows. No se necesita `.env`
+dentro de la imagen. Un archivo pasado con `--env-file` inyecta variables; no
+se incorpora a las capas de la imagen.
+
+Ejemplo para una instalación propia; reemplazar la ruta del archivo privado:
+
+```powershell
+$configFile = 'C:\ruta\privada\shipnow.env'
+docker volume create shipnow-uploads
+docker volume create shipnow-logs
+docker run -d --init --name shipnow-api `
+  --env-file "$configFile" `
+  --env NODE_ENV=production --env PORT=3000 --env LOG_LEVEL=info `
+  --publish 127.0.0.1:3000:3000 `
+  --mount type=volume,source=shipnow-uploads,target=/app/uploads `
+  --mount type=volume,source=shipnow-logs,target=/app/logs `
+  shipnow:m8
+curl.exe -i http://localhost:3000/health
+curl.exe -L http://localhost:3000/api/docs/
+docker inspect shipnow-api --format '{{.State.Health.Status}}'
+docker stop --timeout 15 shipnow-api
+```
+
+También se puede proporcionar todo mediante `--env`, omitiendo `--env-file` y
+añadiendo `--env 'MONGODB_URI=mongodb://nombre-del-mongo:27017/base_de_prueba'`;
+ese nombre debe resolverse en una red Docker compartida usando `--network`.
+Es una URI ficticia de ejemplo. No colocar credenciales en comandos compartidos.
+Las variables pueden verse mediante herramientas de administración de Docker:
+inyectarlas externamente evita hornearlas en la imagen, no las convierte en un
+almacén de secretos. La validación centralizada continúa vigente.
+
+Para cambiar el puerto, por ejemplo a 3107 dentro del contenedor, usar
+`--env PORT=3107 --publish 127.0.0.1:3000:3107`. Se verificó esta combinación real.
+El HEALTHCHECK usa Node nativo y el PORT efectivo, cada 15 segundos, con timeout
+de 5 segundos, período inicial de 10 segundos y 3 reintentos. Consulta `/health`;
+no comprueba continuamente MongoDB. No se instaló curl en la imagen.
+
+El arranque productivo espera MongoDB; una configuración crítica ausente o la
+conexión inicial fallida impiden escuchar y producen salida no cero. Health,
+Swagger y endpoints principales están habilitados en producción; mocks, seed y
+logger-test responden 404 ROUTE_NOT_FOUND. El catálogo OpenAPI sigue completo.
+
+### Volúmenes, permisos y cierre
+
+Usar volúmenes independientes para `/app/uploads` y `/app/logs`. Los volúmenes
+nombrados nuevos reciben los permisos preparados en la imagen. Un volumen previo
+o bind mount puede requerir permisos para UID 1000; no se soluciona ejecutando la
+API como root. Los volúmenes requieren administración, respaldos y una política
+de retención: los logs rotan según la configuración existente y los documentos
+no se eliminan automáticamente.
+
+Staging y archivos definitivos deben quedar dentro del **mismo volumen de
+uploads**, porque el almacenamiento utiliza `fs.link`. No montar staging por
+separado. Reemplazar el contenedor conservando esos volúmenes y la misma base
+mantiene las asociaciones, archivos y logs. MongoDB conserva solo metadatos.
+La descarga continúa siendo controlada por API; uploads no se expone como static.
+
+`docker stop --timeout 15` permite superar el límite interno de cierre de 10
+segundos. Docker entrega SIGTERM mediante init al proceso Node, que drena HTTP,
+desconecta MongoDB y finaliza Winston. No interrumpir descargas activas si se
+quiere un cierre normal; al exceder el plazo se fuerza salida no cero.
+
+### Integración Docker separada de npm test
+
+Con la imagen construida y Docker disponible, ejecutar explícitamente:
+
+```powershell
+node docker-tests/verify.mjs
+```
+
+Si Docker no está en el PATH de la terminal, el script admite su ruta como
+segundo argumento, por ejemplo el ejecutable de la instalación Docker Desktop.
+El verificador no lee `.env`, no usa Atlas ni la base `shipnow`, y rechaza nombres
+de recursos ocupados. Crea la red `shipnow-m8-test`, MongoDB oficial `mongo:8.0`,
+base `shipnow_m8_test`, API productiva, dos contenedores de arranque inválido y
+volúmenes `shipnow-m8-test-uploads`/`shipnow-m8-test-logs`. MongoDB no publica
+puertos; la API publica solo localhost (3000 si está libre). Todos los recursos
+se etiquetan y la limpieza comprueba su pertenencia antes de eliminarlos.
+
+La ejecución aprobó **16 verificaciones reales**: imagen sin archivos privados
+ni herramientas de desarrollo, health/HEALTHCHECK, Swagger completo, paginación,
+seis restricciones internas, persistencia de Products/Users/Orders, carga y
+descarga PDF con bytes exactos, rechazo 415 y staging limpio, logs persistidos,
+reemplazo de API conservando archivos/metadatos/logs y fallos de arranque. Se
+comprobó conexión inicial antes de escuchar y cierre con código 0. El evento
+`DOCKER_PERSISTENCE_PROBE` se genera con Winston dentro del contenedor para
+verificar el volumen, sin habilitar logger-test en producción.
+
+La limpieza elimina solo los contenedores, red, volúmenes y archivo temporal
+creados por el verificador; conserva `shipnow:m8` y las imágenes base descargadas.
+No utiliza comandos prune. Esta prueba es destructiva únicamente para su propia
+base y volúmenes ficticios: no reutilizar esos nombres para datos importantes.
+Se necesita Docker activo y acceso para descargar imágenes si no están en caché.
+
+La imagen instala 126 paquetes productivos; esa instalación informó **0
+vulnerabilidades**. No se realizó un escaneo de vulnerabilidades del sistema
+operativo de la imagen ni se actualizaron dependencias. Mocha, Chai y Supertest
+son intencionalmente ausentes: la suite local sigue ejecutándose con
+`npm ci --include=dev` y conserva sus **604 pruebas**. `npm test` no depende de
+Docker; esta integración real es adicional y permanece separada.
 
 ## Instalación desde un clon limpio (PowerShell)
 

@@ -1,0 +1,34 @@
+# Contexto permitido: manifiestos y código necesario en ejecución (incluye src/docs).
+**
+!package.json
+!package-lock.json
+!src/
+!src/**
+
+# Defensa adicional para archivos privados/generados dentro de subdirectorios.
+**/node_modules
+**/.env*
+**/.git
+**/.aws
+**/.codex
+**/.agents
+**/logs
+**/uploads
+**/coverage
+**/test
+**/tests
+**/test-support
+**/.mocharc*
+**/.vscode
+**/.idea
+**/tmp
+**/temp
+**/*.tmp
+**/*.log
+**/*.pid
+**/*.heapprofile
+**/*.heapsnapshot
+**/report.*.json
+**/*.pem
+**/*.key
+**/credentials*

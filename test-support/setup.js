@@ -2,6 +2,7 @@
 // Las variables heredadas o el .env local no pueden habilitar logs ni conexiones reales.
 Object.assign(process.env, {
   NODE_ENV: 'test',
+  LOG_LEVEL: 'debug',
   PORT: '3000',
   MONGODB_URI: 'mongodb://127.0.0.1:27017/shipnow_test_unused',
 });

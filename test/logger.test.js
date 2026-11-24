@@ -46,13 +46,13 @@ async function closeLogger(logger) {
   logger.close();
 }
 
-async function isolatedLogger(t, nodeEnv) {
+async function isolatedLogger(t, nodeEnv, logLevel) {
   const directory = await mkdtemp(join(tmpdir(), 'shipnow-logger-'));
   const stream = new PassThrough();
   let output = '';
   stream.on('data', data => { output += data.toString(); });
   const consoleTransport = new winston.transports.Stream({ stream });
-  const logger = createAppLogger({ nodeEnv, logDirectory: directory, consoleTransport });
+  const logger = createAppLogger({ nodeEnv, logLevel, logDirectory: directory, consoleTransport });
   t.after(async () => {
     if (!logger.writableFinished) await closeLogger(logger);
     stream.destroy();
@@ -106,12 +106,12 @@ test('development muestra seis niveles legibles con color y guarda JSON sin colo
   }
 });
 
-test('production conserva cinco niveles JSON y excluye debug', async (t) => {
+test('production usa info por defecto y excluye http/debug', async (t) => {
   const { logger, directory, output } = await isolatedLogger(t, 'production');
   for (const level of Object.keys(LOG_LEVELS)) logger[level](`Evento ${level}`);
   await closeLogger(logger);
   const messages = output().trim().split(/\r?\n/).map(line => JSON.parse(line));
-  assert.deepEqual(messages.map(record => record.level), ['fatal', 'error', 'warning', 'info', 'http']);
+  assert.deepEqual(messages.map(record => record.level), ['fatal', 'error', 'warning', 'info']);
   assert.ok(!output().includes('debug'));
   assert.deepEqual((await records(directory, 2)).map(record => record.level).sort(), ['error', 'fatal']);
 });
@@ -217,4 +217,13 @@ test('fallos de transporte se reportan una vez con un texto seguro sin recursió
   assert.deepEqual(write.mock.calls[0].arguments, [
     'ShipNow: no se pudo escribir en un transporte de logging.\n',
   ]);
+});
+
+test('LOG_LEVEL controla la consola y conserva error/fatal en archivo', async t => {
+  const { logger, directory, output } = await isolatedLogger(t, 'production', 'warning');
+  for (const level of Object.keys(LOG_LEVELS)) logger[level](`Evento ${level}`);
+  await closeLogger(logger);
+  assert.deepEqual(output().trim().split(/\r?\n/).map(line => JSON.parse(line).level), ['fatal', 'error', 'warning']);
+  assert.deepEqual((await records(directory, 2)).map(record => record.level).sort(), ['error', 'fatal']);
+  assert.throws(() => createAppLogger({ nodeEnv: 'test', logLevel: 'invalid' }), TypeError);
 });

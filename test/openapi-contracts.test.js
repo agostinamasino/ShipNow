@@ -31,6 +31,18 @@ function resolveRef(reference) {
   return value;
 }
 
+test('OpenAPI conserva catálogo completo y documenta la política por entorno y health', () => {
+  for (const path of ['/api/mocks/users', '/api/mocks/couriers', '/api/mocks/orders', '/api/mocks/deliveries', '/api/mocks/seed', '/api/logger-test']) {
+    const operation = document.paths[path][path.endsWith('/seed') ? 'post' : 'get'];
+    for (const environment of ['development', 'test', 'production']) assert.ok(operation.description.includes(environment));
+    assert.equal(operation.responses[404].$ref, '#/components/responses/RouteNotFound');
+  }
+  assert.deepEqual(document.components.schemas.HealthResponse.required, ['status', 'environment', 'uptime', 'timestamp']);
+  assert.equal(document.components.schemas.HealthResponse.additionalProperties, false);
+  assert.notEqual(document.paths['/api/logger-test'].get.responses[200].content['application/json'].schema.$ref,
+    document.paths['/health'].get.responses[200].content['application/json'].schema.$ref);
+});
+
 function dereference(value) {
   return value.$ref ? resolveRef(value.$ref) : value;
 }
@@ -129,9 +141,9 @@ test('se documentan exactamente las diecinueve operaciones existentes con métod
   }
 });
 
-test('los veintinueve schemas existen y todos los $ref del documento se resuelven', () => {
+test('los treinta schemas existen y todos los $ref del documento se resuelven', () => {
   assert.deepEqual(Object.keys(document.components.schemas).sort(),
-    ['Pagination', 'ProductsPage', 'UsersPage', 'OrdersPage', 'UploadedFilesPage', 'ObjectId', 'ProductCreate', 'Product', 'UserCreate', 'User', 'ErrorResponse', 'HealthResponse',
+    ['LoggerTestResponse', 'Pagination', 'ProductsPage', 'UsersPage', 'OrdersPage', 'UploadedFilesPage', 'ObjectId', 'ProductCreate', 'Product', 'UserCreate', 'User', 'ErrorResponse', 'HealthResponse',
       'Order', 'OrderCreate', 'Delivery', 'MockUser', 'MockCourier', 'MockOrder', 'MockDelivery',
       'MockUsersResponse', 'MockCouriersResponse', 'MockOrdersResponse', 'MockDeliveriesResponse',
       'SeedCounts', 'SeedRequest', 'SeedResponse', 'UploadedFile', 'UserDocumentUpload', 'OrderReceiptUpload'].sort());
@@ -193,7 +205,7 @@ test('ejemplos HTTP de Products, Users y Health respetan los schemas y cuerpos d
   app.use(express.json());
   app.use('/api/products', productsRouter);
   app.use('/api/users', usersRouter);
-  app.get('/health', (req, res) => res.json({ status: 'ok' }));
+  app.get('/health', (req, res) => res.json({ status: 'ok', environment: 'test', uptime: process.uptime(), timestamp: new Date().toISOString() }));
   app.use(errorMiddleware);
   const server = app.listen(0, '127.0.0.1');
   t.after(async () => { if (server.listening) await new Promise(resolve => server.close(resolve)); });
@@ -244,7 +256,7 @@ test('ejemplos HTTP de Products, Users y Health respetan los schemas y cuerpos d
   const health = await fetch(origin + '/health');
   assert.equal(health.status, 200);
   const healthMedia = document.paths['/health'].get.responses[200].content['application/json'];
-  assert.deepEqual(await health.json(), healthMedia.example);
+  assertMatches(healthMedia.schema, await health.json());
   assertMatches(healthMedia.schema, healthMedia.example);
 });
 

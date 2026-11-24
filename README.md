@@ -41,7 +41,8 @@ del usuario. Los errores se propagan al middleware global.
 
 `src/app.js` configura y exporta Express con sus routers, Swagger y middlewares,
 sin abrir puertos ni conectar MongoDB. `src/server.js` importa esa aplicación,
-inicia el servidor HTTP, intenta la conexión y registra los eventos de arranque.
+coordina la conexión y el servidor HTTP según el entorno, y registra el arranque.
+El ciclo de vida compartido está en `src/utils/server-lifecycle.js`.
 Importar la aplicación para pruebas requiere la configuración de entorno válida;
 la preparación de testing la establece antes de importar los módulos.
 
@@ -64,12 +65,16 @@ NODE_ENV=development
 
 Las tres variables son obligatorias y no pueden estar vacías. `PORT` debe ser un
 entero entre 1 y 65535; `NODE_ENV` admite `development`, `test` o `production`.
+`MONGODB_URI` debe usar `mongodb://` o `mongodb+srv://`, con contenido no vacío
+y sin espacios sin codificar. `LOG_LEVEL` es opcional, pero si se define no puede
+estar vacío: admite `fatal`, `error`, `warning`, `info`, `http` o `debug`.
+Su valor predeterminado es `debug` en development/test e `info` en production.
 Si tu `.env` ya existía, agregá `NODE_ENV=development` si falta, conservando la URI.
 
 `src/config/index.js` es el único módulo que carga dotenv y lee `process.env`.
 Carga el `.env` de la raíz del proyecto y respeta las variables ya definidas en
 el entorno del proceso. Exporta `config`, congelado con `Object.freeze`, con las
-propiedades `port` (número), `mongodbUri` y `nodeEnv`. Una configuración inválida
+propiedades `port` (número), `mongodbUri`, `nodeEnv` y `logLevel`. Una configuración inválida
 detiene el arranque antes de conectar a MongoDB, indicando la variable afectada
 sin imprimir su valor.
 
@@ -85,9 +90,100 @@ en Network Access. Copiar la URI de Connect → Drivers a `MONGODB_URI`, incluye
 el nombre de base `shipnow`, y reemplazar las credenciales. Codificar los caracteres
 especiales de la contraseña para una URL. No compartir `.env`: Git lo ignora.
 
-El servidor escucha mientras intenta conectarse a MongoDB. Si la conexión inicial
-falla, los GET de mocks, Swagger y `/health` siguen disponibles. Products, Users y Orders requieren
-MongoDB para leer o guardar documentos.
+En development (y al ejecutar explícitamente server.js en test), el servidor
+escucha mientras intenta conectar a MongoDB. Si falla, los GET de mocks, Swagger
+y `/health` siguen disponibles; la persistencia requiere MongoDB. En production
+se exige conexión inicial exitosa antes de escuchar. Si falla, se registra un
+fatal con diagnóstico privado saneado, se cierran los recursos y el proceso sale
+con código 1. Una configuración inválida impide tanto escuchar como conectar.
+
+## Configuración productiva, health y endpoints internos — Módulo 8
+
+| Variable | Obligatoria | Validación / valor predeterminado |
+| --- | --- | --- |
+| `PORT` | Sí | Entero de 1 a 65535. |
+| `MONGODB_URI` | Sí | No vacía; protocolo mongodb:// o mongodb+srv://, sin espacios sin codificar. La conexión comprueba su aceptación por MongoDB. |
+| `NODE_ENV` | Sí | development, test o production. |
+| `LOG_LEVEL` | No | fatal, error, warning, info, http o debug. Por defecto debug en development/test e info en production. Un valor vacío es inválido. |
+
+Las variables externas tienen prioridad sobre dotenv. Toda lectura de variables
+se mantiene en `src/config/index.js`; el objeto exportado está congelado.
+`LOG_LEVEL` controla el umbral de consola. El archivo conserva siempre y
+exclusivamente error/fatal con la rotación existente. En test el logger
+predeterminado sigue silencioso y sin archivos, incluso con LOG_LEVEL definido.
+Los diagnósticos privados no se envían al cliente.
+
+| Operación | development | test | production |
+| --- | --- | --- | --- |
+| Endpoints principales, archivos y paginación | Sí | Sí | Sí |
+| `/health` y Swagger con sus recursos | Sí | Sí | Sí |
+| Cuatro GET `/api/mocks/*` | Sí | Sí | No: 404 |
+| POST `/api/mocks/seed` | Sí | Sí | No: 404 |
+| GET `/api/logger-test` | Sí | No: 404 | No: 404 |
+
+Las rutas deshabilitadas no se montan y responden ROUTE_NOT_FOUND mediante el
+middleware global, sin ejecutar controllers, services ni repositories del
+módulo. Parámetros, headers o cuerpos no pueden habilitarlas. Se evita exponer
+generación de datos o escrituras de seed en producción. Swagger permanece
+habilitado para consultar los contratos, con advertencias de disponibilidad;
+esto no incorpora autenticación ni cambia los contratos de persistencia.
+
+`GET /health` devuelve HTTP 200 con cuatro campos y sin consultar MongoDB:
+
+```json
+{
+  "status": "ok",
+  "environment": "production",
+  "uptime": 123,
+  "timestamp": "2026-11-23T15:00:00.000Z"
+}
+```
+
+`uptime` proviene de `process.uptime()` (segundos, puede incluir decimales);
+`timestamp` es la fecha actual ISO 8601 UTC. Comprueba que el proceso HTTP está
+operativo, sin hostname, rutas, URI, credenciales ni stacks. No es un monitor
+permanente de MongoDB: una desconexión posterior no cambia este health. En
+production la disponibilidad inicial de MongoDB se exige durante el arranque.
+
+SIGINT (Ctrl+C) y SIGTERM inician un cierre único: se deja de aceptar tráfico,
+se esperan las solicitudes activas, se cierra MongoDB y se finalizan/cierran los
+transportes Winston. También se manejan conexiones y listeners todavía en
+arranque. El plazo total es de 10 segundos; al agotarse, se fuerzan las conexiones
+HTTP y la salida con código 1. Los fallos de cierre se registran saneados y
+marcan salida no cero; tras intentar liberar todos los recursos se fuerza la
+salida con código 1 para no dejar conexiones vivas. Si el logger ya está finalizado se usa un mensaje fijo a
+stderr. Un cierre forzado puede interrumpir solicitudes y perder logs pendientes.
+Importar `src/app.js` en tests no escucha, conecta ni registra señales.
+
+Ejemplo de ejecución local con configuración propia válida, sin modificar `.env`:
+
+```powershell
+# Terminal del servidor; estas variables externas tienen prioridad sobre dotenv.
+$env:NODE_ENV = 'production'
+$env:LOG_LEVEL = 'info'
+npm start
+# Ctrl+C solicita cierre ordenado. Para volver a desarrollo en esta terminal:
+# $env:NODE_ENV = 'development'
+# Remove-Item Env:LOG_LEVEL
+```
+
+En otra terminal, con la API iniciada (ajustar PORT):
+
+```powershell
+Invoke-RestMethod http://localhost:3000/health
+curl.exe -i http://localhost:3000/health
+curl.exe -L http://localhost:3000/api/docs
+curl.exe -i 'http://localhost:3000/api/mocks/users?qty=1'
+# En production, el último devuelve 404 ROUTE_NOT_FOUND.
+```
+
+En Linux/macOS: `NODE_ENV=production LOG_LEVEL=info npm start`; usar `curl` en
+lugar de `curl.exe` y Ctrl+C para SIGINT o `kill -TERM <pid>` para SIGTERM.
+Verificación de esta etapa: 604 pruebas (212 de regresión y 392 funcionales),
+incluidas 39 nuevas. Se comprueban arranque/cierre con recursos simulados y
+procesos aislados; no se accede a Atlas ni se ejecuta seed real.
+
+La entrega aún no incluye instrucciones definitivas de Docker.
 
 ## Instalación desde un clon limpio (PowerShell)
 
@@ -149,7 +245,7 @@ Para POST, elegir Body → raw → JSON y `Content-Type: application/json`.
 
 | Método | Ruta | Resultado |
 | --- | --- | --- |
-| GET | `/health` | 200, `{"status":"ok"}` |
+| GET | `/health` | 200, status, environment, uptime y timestamp; ver Health del Módulo 8. |
 | GET | `/api/products` | 200, página de productos |
 | POST | `/api/products` | 201, producto guardado |
 | GET | `/api/users` | 200, página de usuarios |
@@ -637,8 +733,8 @@ Un número menor representa mayor severidad. `LOG_LEVELS` está congelado median
 
 | Entorno | Consola | Archivos |
 | --- | --- | --- |
-| `development` | Seis niveles, timestamp, nivel y mensaje legibles, con colores. | `error` y `fatal` en JSON. |
-| `production` | Desde `http` hasta `fatal`, en JSON. Se excluye `debug`. | `error` y `fatal` en JSON. |
+| `development` | Seis niveles por defecto, timestamp, nivel y mensaje legibles, con colores; configurable con LOG_LEVEL. | `error` y `fatal` en JSON. |
+| `production` | Desde `info` hasta `fatal` por defecto, en JSON; configurable con LOG_LEVEL. | `error` y `fatal` en JSON. |
 | `test` | Instancia predeterminada silenciosa. | Sin transporte de archivos por defecto. Las pruebas usan carpetas temporales y transportes aislados. |
 
 ### Archivos, rotación y protección de datos
@@ -700,7 +796,7 @@ evitar recursión.
 | Origen | Evento y nivel |
 | --- | --- |
 | Arranque | `SERVER_LISTENING` en `info`. |
-| MongoDB | `MONGODB_CONNECTED` en `info` o `MONGODB_CONNECTION_FAILED` en `error`. |
+| MongoDB | `MONGODB_CONNECTED` en `info`; fallo inicial en `error` en development/test y `fatal` en production. |
 | Servidor HTTP | `SERVER_LISTEN_FAILED` en `fatal`, con código de salida 1. |
 | Middleware global | `HTTP_ERROR code=... status=...` en `error` para HTTP 500, incluidos los fallos conocidos de archivos; `warning` para los demás errores actuales, incluido 503 del seed. |
 | Solicitudes | Un `HTTP_REQUEST method=... route=... status=... durationMs=...` en `http` al finalizar la respuesta. |
@@ -728,6 +824,9 @@ de resolver una ruta, usan `UNMATCHED_ROUTE`. Se conservan etiquetas estáticas 
 los prefijos conocidos. Al agregar nuevos routers debe revisarse esa lista.
 El resumen HTTP y la clasificación de error son eventos diferentes, uno por
 solicitud completada y otro por error, respectivamente.
+
+LOG_LEVEL ajusta la consola; para incluir resúmenes HTTP en producción se puede
+definir `LOG_LEVEL=http`. Los archivos siguen reservados a error/fatal.
 
 ### Demostración de los seis niveles
 
@@ -845,10 +944,12 @@ La interfaz puede redirigir a `/api/docs/` para servir sus recursos relativos.
 Si `PORT` tiene otro valor, usá ese puerto también en la URL. El selector de
 servidor de Swagger refleja el puerto configurado.
 
-La documentación funciona en `development`, `test` y `production`. Con una
-configuración de entorno válida, la interfaz y sus recursos se sirven aunque
-MongoDB esté desconectado. Products, Users, Orders y el seed siguen requiriendo MongoDB
-para las operaciones de persistencia.
+La documentación y sus recursos están habilitados en los tres entornos y no
+ejecutan consultas a MongoDB. En development el servidor puede servirlos sin
+conexión; en production el arranque exige primero una conexión inicial exitosa.
+El catálogo incluye operaciones deshabilitadas según NODE_ENV: mocks y seed solo
+en development/test; logger-test solo en development. Una operación documentada
+puede devolver 404 ROUTE_NOT_FOUND por esta política.
 
 Comprobación desde PowerShell, con el servidor en otra terminal.
 
@@ -870,7 +971,7 @@ curl -i "$base/api/mocks/deliveries?qty=1"
 
 ### Alcance documentado
 
-La especificación contiene **19 operaciones** y **29 schemas reutilizables**.
+La especificación contiene **19 operaciones** y **30 schemas reutilizables**.
 
 | Tag | Operaciones o representación |
 | --- | --- |
@@ -1234,7 +1335,7 @@ Winston registra `FILE_UPLOAD_COMPLETED` en info solo tras confirmar la asociaci
 Swagger en `/api/docs` documenta las cuatro operaciones con multipart, schemas
 `UserDocumentUpload`, `OrderReceiptUpload` y `UploadedFile`, y ejemplos de los diez
 errores de carga. También documenta la descarga binaria. El total actual es
-**19 operaciones y 29 schemas**.
+**19 operaciones y 30 schemas**.
 
 ```sh
 npm run test:regression

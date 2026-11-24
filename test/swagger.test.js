@@ -1,3 +1,4 @@
+import { assertHealth } from '../test-support/health.js';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -106,7 +107,7 @@ test('server sirve HTML, CSS y scripts de Swagger UI aunque falle la conexión M
   assert.equal(mongoose.connection.readyState, 0);
   const health = await fetch(origin + '/health');
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: 'ok' });
+  assertHealth(await health.json());
   const missing = await fetch(origin + '/api/no-existe');
   assert.equal(missing.status, 404);
   assert.deepEqual(await missing.json(), {

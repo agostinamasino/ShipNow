@@ -1,3 +1,4 @@
+import { assertHealth } from '../../test-support/health.js';
 import { expect } from 'chai';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -44,7 +45,7 @@ describe('Logger por HTTP en procesos aislados', () => {
       expect(result.status, result.stderr).to.equal(0);
       const output = JSON.parse(result.stdout);
       expect(output.connected).to.equal(0);
-      expect(output.health).to.deep.equal({ status: 'ok' });
+      assertHealth(output.health, nodeEnv);
       if (nodeEnv === 'development') {
         expect(output.status).to.equal(200);
         expect(output.body).to.deep.equal({ status: 'ok' });

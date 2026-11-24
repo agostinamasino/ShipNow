@@ -22,7 +22,7 @@ function preview({ tags, operationId, summary, description, schema, example }) {
   return {
     get: {
       tags, operationId, summary,
-      description: 'Genera un lote independiente en memoria, sin insertar documentos en MongoDB ni requerir conexión. '
+      description: 'Disponible en development y test; deshabilitado en production con 404 ROUTE_NOT_FOUND. Genera un lote independiente en memoria, sin insertar documentos en MongoDB ni requerir conexión. '
         + description + ' Los errores globales del parser aplican si se envía un cuerpo JSON.',
       parameters: [{
         name: 'qty', in: 'query', required: false, description: qtyDescription,
@@ -34,6 +34,7 @@ function preview({ tags, operationId, summary, description, schema, example }) {
           content: { 'application/json': { schema: { $ref: `#/components/schemas/${schema}` }, example } },
         },
         400: { $ref: '#/components/responses/MockBadRequest' },
+        404: { $ref: '#/components/responses/RouteNotFound' },
         413: { $ref: '#/components/responses/PayloadTooLarge' },
         500: { $ref: '#/components/responses/InternalError' },
       },
@@ -66,7 +67,7 @@ export default {
   '/api/mocks/seed': {
     post: {
       tags: ['Mocks'], operationId: 'seedMocks', summary: 'Insertar un lote de prueba relacionado',
-      description: 'ATENCIÓN: ejecutar este endpoint desde Swagger UI INSERTA datos reales en la base configurada. '
+      description: 'Disponible en development y test; deshabilitado en production con 404 ROUTE_NOT_FOUND. ATENCIÓN: ejecutar este endpoint desde Swagger UI INSERTA datos reales en la base configurada. '
         + 'Con qty=10 se crean 10 usuarios, 10 repartidores, 10 pedidos y 10 entregas (40 documentos). '
         + 'qty admite 1–25, sin valor predeterminado. Alternativamente, enviá un body con cantidades explícitas, '
         + 'enteras no negativas. Los campos omitidos cuentan como cero. El total permitido es de 1 a 100 documentos. '
@@ -109,6 +110,7 @@ export default {
           } },
         },
         400: { $ref: '#/components/responses/SeedBadRequest' },
+        404: { $ref: '#/components/responses/RouteNotFound' },
         413: { $ref: '#/components/responses/PayloadTooLarge' },
         503: { $ref: '#/components/responses/SeedUnavailable' },
         500: { $ref: '#/components/responses/InternalError' },

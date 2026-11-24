@@ -3,15 +3,9 @@ import winston from 'winston';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import config from './index.js';
 import { privateDiagnostic } from './error-diagnostic.js';
+import { LOG_LEVELS, DEFAULT_LOG_LEVELS } from './log-levels.js';
 
-export const LOG_LEVELS = Object.freeze({
-  fatal: 0,
-  error: 1,
-  warning: 2,
-  info: 3,
-  http: 4,
-  debug: 5,
-});
+export { LOG_LEVELS } from './log-levels.js';
 
 const colors = {
   fatal: 'bold red', error: 'red', warning: 'yellow',
@@ -49,10 +43,11 @@ const publicRecord = winston.format(info => {
 const importantOnly = winston.format(info =>
   ['error', 'fatal'].includes(info[Symbol.for('level')]) ? info : false);
 
-export function createAppLogger({ nodeEnv = config.nodeEnv, logDirectory, consoleTransport } = {}) {
+export function createAppLogger({ nodeEnv = config.nodeEnv, logLevel = nodeEnv === config.nodeEnv ? config.logLevel : DEFAULT_LOG_LEVELS[nodeEnv], logDirectory, consoleTransport } = {}) {
   if (!['development', 'test', 'production'].includes(nodeEnv)) {
     throw new TypeError('Entorno del logger inválido.');
   }
+  if (!Object.hasOwn(LOG_LEVELS, logLevel)) throw new TypeError('Nivel del logger inválido.');
 
   let failureReported = false;
   function transportFailure() {
@@ -63,7 +58,7 @@ export function createAppLogger({ nodeEnv = config.nodeEnv, logDirectory, consol
   }
 
   const consoleOutput = consoleTransport ?? new winston.transports.Console();
-  consoleOutput.level = nodeEnv === 'production' ? 'http' : 'debug';
+  consoleOutput.level = logLevel;
   consoleOutput.format = nodeEnv === 'development'
     ? winston.format.combine(
       winston.format.colorize({ colors }),
@@ -91,7 +86,7 @@ export function createAppLogger({ nodeEnv = config.nodeEnv, logDirectory, consol
 
   const logger = winston.createLogger({
     levels: LOG_LEVELS,
-    level: nodeEnv === 'production' ? 'http' : 'debug',
+    level: logLevel,
     silent: nodeEnv === 'test' && !consoleTransport && logDirectory === undefined,
     format: winston.format.combine(publicRecord(), winston.format.timestamp()),
     transports,

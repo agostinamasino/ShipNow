@@ -61,9 +61,9 @@ test('Products normaliza solo la página: un estado inválido fuera de ella no r
   await assert.rejects(getProducts({ page: '2' }), /Estado inválido/);
 });
 
-test('OpenAPI mantiene 19 operaciones, 29 schemas y contratos paginados en cinco GET', () => {
+test('OpenAPI mantiene 19 operaciones, 30 schemas y contratos paginados en cinco GET', () => {
   assert.equal(Object.values(document.paths).reduce((sum, path) => sum + Object.keys(path).length, 0), 19);
-  assert.equal(Object.keys(document.components.schemas).length, 29);
+  assert.equal(Object.keys(document.components.schemas).length, 30);
   for (const [path, schema] of [
     ['/api/products', 'ProductsPage'], ['/api/users', 'UsersPage'], ['/api/orders', 'OrdersPage'],
     ['/api/users/{id}/documents', 'UploadedFilesPage'], ['/api/orders/{id}/receipts', 'UploadedFilesPage'],

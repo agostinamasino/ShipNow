@@ -1,3 +1,4 @@
+import { assertHealth } from '../test-support/health.js';
 import { mockList, pageOf } from '../test-support/pagination.js';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
@@ -178,7 +179,7 @@ test('el servidor aplica el parser, 404 y middleware global, y conserva las ruta
   await assertHttpError(await request('/api/no-existe'), 'ROUTE_NOT_FOUND');
   const health = await request('/health');
   assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: 'ok' });
+  assertHealth(await health.json());
   for (const [path, item] of [['/api/products', product], ['/api/users', user]]) {
     const list = await request(path);
     assert.equal(list.status, 200);

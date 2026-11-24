@@ -20,14 +20,14 @@ export function createApp({ uploadRoot } = {}) {
   app.use('/api/products', productsRouter);
   app.use('/api/users', usersRouter);
   app.use('/api/orders', ordersRouter);
-  app.use('/api/mocks', mocksRouter);
+  if (config.nodeEnv !== 'production') app.use('/api/mocks', mocksRouter);
   app.use('/api', createFilesRouter({ root: uploadRoot }));
   if (config.nodeEnv === 'development') {
     app.use('/api/logger-test', loggerRouter);
   }
 
   app.get('/health', (req, res) => {
-    res.json({ status: 'ok' });
+    res.json({ status: 'ok', environment: config.nodeEnv, uptime: process.uptime(), timestamp: new Date().toISOString() });
   });
 
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openapi, {

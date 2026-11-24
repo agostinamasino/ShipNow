@@ -7,7 +7,7 @@ export default {
         200: {
           description: 'Demostración ejecutada en desarrollo.',
           content: { 'application/json': {
-            schema: { $ref: '#/components/schemas/HealthResponse' }, example: { status: 'ok' },
+            schema: { $ref: '#/components/schemas/LoggerTestResponse' }, example: { status: 'ok' },
           } },
         },
         400: { $ref: '#/components/responses/InvalidJson' },

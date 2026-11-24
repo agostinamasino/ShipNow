@@ -1,3 +1,4 @@
+import { assertHealth } from '../test-support/health.js';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
@@ -36,7 +37,8 @@ for (const nodeEnv of ['development', 'production', 'test']) {
         return server;
       };
       try {
-        await import('./src/server.js');
+        const { lifecycle } = await import('./src/server.js');
+        await lifecycle.ready;
         if (!server.listening) await once(server, 'listening');
         const origin = 'http://127.0.0.1:' + server.address().port;
         const response = await fetch(origin + '/api/logger-test?email=PRIVATE_ENDPOINT_VALUE@example.com', {
@@ -82,7 +84,7 @@ for (const nodeEnv of ['development', 'production', 'test']) {
       });
       assert.deepEqual(demonstration, []);
     }
-    assert.deepEqual(output.health, { status: 'ok' });
+    assertHealth(output.health, nodeEnv);
     assert.deepEqual(output.docs, { status: 200, html: true });
     assert.equal(output.exitCode, 0);
     assert.ok(!JSON.stringify(output.events).includes('PRIVATE_ENDPOINT_VALUE'));

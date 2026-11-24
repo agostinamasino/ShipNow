@@ -145,7 +145,16 @@ export default {
     },
   },
   HealthResponse: {
-    type: 'object', required: ['status'],
+    type: 'object', additionalProperties: false, required: ['status', 'environment', 'uptime', 'timestamp'],
+    properties: {
+      status: { type: 'string', enum: ['ok'] },
+      environment: { type: 'string', enum: ['development', 'test', 'production'] },
+      uptime: { type: 'number', minimum: 0, description: 'Segundos de actividad del proceso, obtenidos con process.uptime().' },
+      timestamp: { type: 'string', format: 'date-time', description: 'Fecha actual ISO 8601 UTC.' },
+    },
+  },
+  LoggerTestResponse: {
+    type: 'object', additionalProperties: false, required: ['status'],
     properties: { status: { type: 'string', enum: ['ok'] } },
   },
   OrderCreate: {
